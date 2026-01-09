@@ -144,20 +144,6 @@ itowns.View.prototype.addLayer.call(view, globe2);
 itowns.View.prototype.addLayer.call(view, new itowns.ColorLayer('Ortho_globe2', { source: orthoSource }), globe2);
 itowns.View.prototype.addLayer.call(view, new itowns.ElevationLayer('MNT_WORLD_globe2', { source: elevationSource }), globe2);
 
-// ---------- GLOBE 3 (same View, third GlobeLayer) ----------
-const globe3Object3D = new THREE.Object3D();
-globe3Object3D.updateMatrixWorld(true);
-
-const globe3 = new itowns.GlobeLayer('globe3', globe3Object3D);
-globe3.diffuse = new THREE.Color(0xd0d5d8);
-
-// Add globe3 so it gets updated by the view
-itowns.View.prototype.addLayer.call(view, globe3);
-
-// Add layers to globe3
-itowns.View.prototype.addLayer.call(view, new itowns.ColorLayer('Ortho_globe3', { source: orthoSource }), globe3);
-itowns.View.prototype.addLayer.call(view, new itowns.ElevationLayer('MNT_WORLD_globe3', { source: elevationSource }), globe3);
-
 // ============================================================================
 // UI (styled like your previous file, now supports multiple instances)
 // ============================================================================
@@ -261,7 +247,6 @@ function createStencilWidget({
     onLog,
     panelStyle = {},
     rotateButtonLabel,
-    controls = {},
 }) {
     ensureUIPanelStyles();
 
@@ -271,17 +256,6 @@ function createStencilWidget({
 
     const state = { radius: 1500, picking: false, opacity: 0.35 };
 
-    const activeControls = {
-        pick: true,
-        center: true,
-        log: true,
-        stencil: true,
-        rotate: true,
-        resetGlobe: true,
-        status: true,
-        ...controls,
-    };
-
     const pickId = `${idPrefix}-pick`;
     const rId = `${idPrefix}-r`;
     const rvId = `${idPrefix}-rv`;
@@ -289,42 +263,24 @@ function createStencilWidget({
     const ovId = `${idPrefix}-ov`;
     const statusId = `${idPrefix}-status`;
 
-    const pickHtml = activeControls.pick
-        ? `<button id="${pickId}" style="${UI_BUTTON_STYLE}">Reposition (click map)</button>`
-        : '';
-    const centerHtml = activeControls.center
-        ? `<button id="${idPrefix}-reset" style="${UI_BUTTON_STYLE}">Center</button>`
-        : '';
-    const logHtml = activeControls.log
-        ? `<button id="${idPrefix}-log" style="${UI_BUTTON_STYLE}">Log</button>`
-        : '';
-    const actionButtons = [centerHtml, `<button id="${idPrefix}-vis" style="${UI_BUTTON_STYLE}">Hide cyl</button>`, logHtml]
-        .filter(Boolean)
-        .join('\n');
-    const actionRowHtml = `<div style="display:flex; gap:8px; flex-wrap:wrap;">${actionButtons}</div>`;
-    const stencilHtml = activeControls.stencil
-        ? `<button id="${idPrefix}-stencil" style="${UI_BUTTON_STYLE}; align-self:flex-start;">Disable stencil</button>`
-        : '';
-    const rotateRowHtml = rotateButtonLabel && (activeControls.rotate || activeControls.resetGlobe)
-        ? `<div style="display:flex; gap:8px; flex-wrap:wrap;">
-      ${activeControls.rotate ? `<button id="${idPrefix}-rotate" style="${UI_BUTTON_STYLE};">${rotateButtonLabel}</button>` : ''}
-      ${activeControls.resetGlobe ? `<button id="${idPrefix}-reset-globe" style="${UI_BUTTON_STYLE};">Reset globe</button>` : ''}
-    </div>` : '';
-    const statusHtml = activeControls.status
-        ? `<div id="${statusId}" style="opacity:0.85;">Patched tile materials: 0</div>`
-        : '';
-
     panel.innerHTML = `
     <div style="font-weight:bold; font-size:14px; border-bottom:1px solid #555; padding-bottom:5px;">
       ${title}
     </div>
 
-    ${pickHtml}
+    <button id="${pickId}" style="${UI_BUTTON_STYLE}">Reposition (click map)</button>
 
-    ${actionRowHtml}
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button id="${idPrefix}-reset" style="${UI_BUTTON_STYLE}">Center</button>
+      <button id="${idPrefix}-vis" style="${UI_BUTTON_STYLE}">Hide cyl</button>
+      <button id="${idPrefix}-log" style="${UI_BUTTON_STYLE}">Log</button>
+    </div>
 
-    ${stencilHtml}
-    ${rotateRowHtml}
+    <button id="${idPrefix}-stencil" style="${UI_BUTTON_STYLE}; align-self:flex-start;">Disable stencil</button>
+    ${rotateButtonLabel ? `<div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button id="${idPrefix}-rotate" style="${UI_BUTTON_STYLE};">${rotateButtonLabel}</button>
+      <button id="${idPrefix}-reset-globe" style="${UI_BUTTON_STYLE};">Reset globe</button>
+    </div>` : ''}
 
     <div style="display:flex; flex-direction:column; gap:6px;">
       <div style="display:flex; justify-content:space-between;">
@@ -342,7 +298,7 @@ function createStencilWidget({
       <input id="${oId}" type="range" min="0" max="1" step="0.01" value="${state.opacity}">
     </div>
 
-    ${statusHtml}
+    <div id="${statusId}" style="opacity:0.85;">Patched tile materials: 0</div>
   `;
 
     document.body.appendChild(panel);
@@ -365,38 +321,29 @@ function createStencilWidget({
     const status = panel.querySelector(`#${statusId}`);
 
     // Hard fail early if something is wrong (prevents silent null usage)
-    const rotateControlsExpected = !!rotateButtonLabel;
-    const required = [
-        radiusInput && radiusLabel && opacityInput && opacityLabel,
-        !activeControls.pick || btnPick,
-        !activeControls.stencil || btnStencil,
-        !activeControls.center || btnReset,
-        !activeControls.log || btnLog,
-        !rotateControlsExpected || !activeControls.rotate || btnRotate,
-        !rotateControlsExpected || !activeControls.resetGlobe || btnResetGlobe,
-        !activeControls.status || status,
-    ];
-    if (required.some((ok) => !ok)) throw new Error(`[UI] Missing element(s) for widget "${idPrefix}"`);
+    if (!btnPick || !radiusInput || !radiusLabel || !opacityInput || !opacityLabel || !status || !btnStencil) {
+        throw new Error(`[UI] Missing element(s) for widget "${idPrefix}"`);
+    }
 
     const setPicking = (v) => {
         state.picking = !!v;
-        if (btnPick) btnPick.classList.toggle('is-active', state.picking);
-        onTogglePick?.(state.picking);
+        btnPick.classList.toggle('is-active', state.picking);
+        onTogglePick(state.picking);
     };
 
-    if (btnPick) btnPick.addEventListener('click', () => setPicking(!state.picking));
+    btnPick.addEventListener('click', () => setPicking(!state.picking));
 
     radiusInput.addEventListener('input', (e) => {
         const u = parseFloat(e.target.value);
         state.radius = radiusFromSlider01(u);
         radiusLabel.textContent = `${state.radius.toFixed(0)} m`;
-        onRadius01?.(u);
+        onRadius01(u);
     });
 
     opacityInput.addEventListener('input', (e) => {
         state.opacity = parseFloat(e.target.value);
         opacityLabel.textContent = state.opacity.toFixed(2);
-        onOpacity?.(state.opacity);
+        onOpacity(state.opacity);
     });
 
     let cylVisible = true;
@@ -404,10 +351,10 @@ function createStencilWidget({
     let rotateMode = false;
 
 
-    if (btnReset) btnReset.addEventListener('click', () => onReset?.());
-    if (btnLog) btnLog.addEventListener('click', () => onLog?.());
+    btnReset.addEventListener('click', () => onReset?.());
+    btnLog.addEventListener('click', () => onLog?.());
 
-    if (btnVis) btnVis.addEventListener('click', () => {
+    btnVis.addEventListener('click', () => {
         cylVisible = !cylVisible;
         btnVis.textContent = cylVisible ? 'Hide cyl' : 'Show cyl';
         onToggleCylinder?.(cylVisible);
@@ -423,19 +370,21 @@ function createStencilWidget({
         onToggleStencil?.(stencilEnabled);
     };
 
-    if (btnStencil) {
-        btnStencil.addEventListener('click', () => {
-            setStencilEnabled(!stencilEnabled);
-        });
-    }
+    btnStencil.addEventListener('click', () => {
+        setStencilEnabled(!stencilEnabled);
+    });
 
     const setRotateMode = (v) => {
         rotateMode = !!v;
         if (btnRotate) btnRotate.classList.toggle('is-active', rotateMode);
         onToggleRotate?.(rotateMode);
     };
-    if (btnRotate) btnRotate.addEventListener('click', () => setRotateMode(!rotateMode));
-    if (btnResetGlobe) btnResetGlobe.addEventListener('click', () => onResetGlobe?.());
+    if (btnRotate) {
+        btnRotate.addEventListener('click', () => setRotateMode(!rotateMode));
+    }
+    if (btnResetGlobe) {
+        btnResetGlobe.addEventListener('click', () => onResetGlobe?.());
+    }
 
     const setStencilEnabledPublic = setStencilEnabled;
     const setRotateModePublic = setRotateMode;
@@ -469,7 +418,7 @@ function makeStencilCylinder(view, uniforms, {
         transparent: true,
         opacity,
         depthWrite: false,
-        depthTest: true,
+        depthTest: false,
         side: THREE.DoubleSide,
     });
 
@@ -695,12 +644,12 @@ function patchMeshesUnderRoot({ root, stencilId, uniforms, state }) {
 }
 
 // ============================================================================
-// Build three independent stencils (UI + cylinder + patching + picking)
+// Build two independent stencils (UI + cylinder + patching + picking)
 // ============================================================================
 
 const stencil1 = {
     id: 'g1',
-    title: 'Camera Globe — Origin',
+    title: 'Globe 1 — Ortho stencil',
     panelPos: { left: '10px', top: '10px' },
     color: 0x2f8bff,
     uniforms: createStencilUniforms(1500.0),
@@ -712,7 +661,7 @@ const stencil1 = {
 const globe2Scale = globe2Object3D.scale.x || 1;
 const stencil2 = {
     id: 'g2',
-    title: 'Target Globe — Destination',
+    title: 'Globe 2 — Ortho stencil',
     panelPos: { right: '10px', top: '10px' },
     color: 0xff3344,
     uniforms: createStencilUniforms(1500.0 * globe2Scale),
@@ -722,167 +671,8 @@ const stencil2 = {
     rotating: false,
 };
 
-const globe3Scale = globe3Object3D.scale.x || 1;
-const stencil3 = {
-    id: 'g3',
-    title: 'Context Globe — In-between',
-    panelPos: { left: '50%', top: '10px', transform: 'translateX(-50%)' },
-    color: 0x2ecc71,
-    uniforms: createStencilUniforms(1500.0 * globe3Scale),
-    patchRoot: () => globe3Object3D,
-    state: { patched: new WeakSet(), count: 0 },
-    picking: false,
-};
-
 stencil1.cylinder = makeStencilCylinder(view, stencil1.uniforms, { radius: stencil1.uniforms.uStencilRadius.value, color: stencil1.color, opacity: 0.35 });
 stencil2.cylinder = makeStencilCylinder(view, stencil2.uniforms, { radius: stencil2.uniforms.uStencilRadius.value, color: stencil2.color, opacity: 0.35 });
-stencil3.cylinder = makeStencilCylinder(view, stencil3.uniforms, { radius: stencil3.uniforms.uStencilRadius.value, color: stencil3.color, opacity: 0.35 });
-
-function makeGhostCylinder(view, {
-    radius = 1500,
-    opacity = 0.35,
-    color = 0xff0000,
-} = {}) {
-    const geom = new THREE.CylinderGeometry(1, 1, 1, 48, 1, true);
-    const mat = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity,
-        depthWrite: false,
-        depthTest: true,
-        side: THREE.DoubleSide,
-    });
-
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.name = 'GhostCylinder';
-    mesh.frustumCulled = false;
-    mesh.renderOrder = 51;
-    mesh.visible = false;
-    view.scene.add(mesh);
-
-    const state = {
-        center: new THREE.Vector3(),
-        radius,
-        height: Math.max(1, radius * 0.5),
-    };
-
-    function updateFromState() {
-        const axis = state.center.lengthSq() > 0 ? state.center.clone().normalize() : new THREE.Vector3(0, 1, 0);
-        state.height = Math.max(1, state.radius * 0.5);
-        const up = new THREE.Vector3(0, 1, 0);
-        mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(up, axis));
-        mesh.scale.set(state.radius, state.height, state.radius);
-        mesh.position.copy(state.center);
-        mesh.updateMatrixWorld(true);
-        view.notifyChange(true);
-    }
-
-    return {
-        mesh,
-        setCenterECEF(v) {
-            state.center.copy(v);
-            updateFromState();
-        },
-        setRadiusMeters(r) {
-            state.radius = Math.max(1, +r || 1);
-            updateFromState();
-        },
-        setOpacity(a) {
-            mesh.material.opacity = THREE.MathUtils.clamp(+a || 0, 0, 1);
-            view.notifyChange(true);
-        },
-        update: updateFromState,
-    };
-}
-
-const identityQuat = new THREE.Quaternion();
-const tempQuat = new THREE.Quaternion();
-const ghostBlue = makeGhostCylinder(view, { radius: stencil1.uniforms.uStencilRadius.value, color: stencil1.color, opacity: 0.35 });
-const ghostRed = makeGhostCylinder(view, { radius: stencil2.uniforms.uStencilRadius.value, color: stencil2.color, opacity: 0.35 });
-const contextModeState = {
-    enabled: false,
-    globe1Visible: true,
-    globe2Visible: true,
-    cyl1Visible: true,
-    cyl2Visible: true,
-    stencil3Enabled: true,
-};
-
-function getGlobe1Root() {
-    return view?.tileLayer?.object3d || null;
-}
-
-function mapCenterToGlobe(fromRoot, toRoot, position) {
-    if (!fromRoot || !toRoot) return position.clone();
-    fromRoot.updateMatrixWorld(true);
-    toRoot.updateMatrixWorld(true);
-    const local = fromRoot.worldToLocal(position.clone());
-    return toRoot.localToWorld(local);
-}
-
-function mapFromContext(position, targetRoot) {
-    return mapCenterToGlobe(globe3Object3D, targetRoot, position);
-}
-
-function updateContextCylinders() {
-    if (!contextModeState.enabled) return;
-    const p1 = stencil1.uniforms.uStencilCenter.value;
-    const p2 = stencil2.uniforms.uStencilCenter.value;
-    if (p1) ghostBlue.setCenterECEF(mapCenterToGlobe(getGlobe1Root(), globe3Object3D, p1));
-    if (p2) ghostRed.setCenterECEF(mapCenterToGlobe(globe2Object3D, globe3Object3D, p2));
-
-    const globe1Scale = getGlobe1Root()?.scale?.x || 1;
-    const baseRadius1 = stencil1.uniforms.uStencilRadius.value / globe1Scale;
-    const baseRadius2 = stencil2.uniforms.uStencilRadius.value / globe2Scale;
-    ghostBlue.setRadiusMeters(baseRadius1 * globe3Scale);
-    ghostRed.setRadiusMeters(baseRadius2 * globe3Scale);
-    ghostBlue.setOpacity(stencil1.cylinder.mesh.material.opacity);
-    ghostRed.setOpacity(stencil2.cylinder.mesh.material.opacity);
-    ghostBlue.mesh.visible = contextModeState.cyl1Visible;
-    ghostRed.mesh.visible = contextModeState.cyl2Visible;
-}
-
-function setContextMode(enabled) {
-    contextModeState.enabled = !!enabled;
-    const globe1Root = getGlobe1Root();
-    if (contextModeState.enabled) {
-        contextModeState.globe1Visible = globe1Root ? globe1Root.visible : true;
-        contextModeState.globe2Visible = globe2Object3D.visible;
-        contextModeState.cyl1Visible = stencil1.cylinder.mesh.visible;
-        contextModeState.cyl2Visible = stencil2.cylinder.mesh.visible;
-        contextModeState.stencil3Enabled = stencil3.uniforms.uStencilEnabled.value > 0.5;
-        if (globe1Root) globe1Root.visible = false;
-        globe2Object3D.visible = false;
-        stencil1.cylinder.mesh.visible = false;
-        stencil2.cylinder.mesh.visible = false;
-        stencil3.ui.setStencilEnabled(false);
-        ghostBlue.mesh.visible = contextModeState.cyl1Visible;
-        ghostRed.mesh.visible = contextModeState.cyl2Visible;
-        updateContextCylinders();
-    } else {
-        if (globe1Root) globe1Root.visible = contextModeState.globe1Visible;
-        globe2Object3D.visible = contextModeState.globe2Visible;
-        stencil1.cylinder.mesh.visible = contextModeState.cyl1Visible;
-        stencil2.cylinder.mesh.visible = contextModeState.cyl2Visible;
-        stencil3.ui.setStencilEnabled(contextModeState.stencil3Enabled);
-        ghostBlue.mesh.visible = false;
-        ghostRed.mesh.visible = false;
-    }
-    view.notifyChange(true);
-}
-function updateGreenFromBlueRed() {
-    const p1 = stencil1.uniforms.uStencilCenter.value;
-    const p2 = stencil2.uniforms.uStencilCenter.value;
-    if (!p1 || !p2) return;
-    const mid = p1.clone().add(p2).multiplyScalar(0.5);
-    stencil3.cylinder.setCenterECEF(mid);
-
-    tempQuat.slerpQuaternions(identityQuat, globe2Object3D.quaternion, 0.5);
-    globe3Object3D.quaternion.copy(tempQuat);
-    globe3Object3D.updateMatrixWorld(true);
-    view.notifyChange(true);
-    updateContextCylinders();
-}
 
 function initStencilCenters() {
     const c = view.controls.getLookAtCoordinate();
@@ -894,8 +684,6 @@ function initStencilCenters() {
     // place stencil2 on globe2 at analogous location: p2 = pos + scale * p1
     const p2 = p1.clone().multiplyScalar(globe2Scale).add(globe2Object3D.position);
     stencil2.cylinder.setCenterECEF(p2);
-
-    updateGreenFromBlueRed();
 }
 
 function setExclusivePicking(stencil, active) {
@@ -922,7 +710,6 @@ function rotateGlobe2ToTarget(targetECEF) {
     globe2Object3D.quaternion.premultiply(q);
     globe2Object3D.updateMatrixWorld(true);
     view.notifyChange(true);
-    updateGreenFromBlueRed();
 }
 
 function centerCylinderAtScreenCenter(stencil) {
@@ -931,17 +718,13 @@ function centerCylinderAtScreenCenter(stencil) {
     const y = gfx?.height ? gfx.height * 0.5 : viewerDiv.clientHeight * 0.5;
     const picked = view.getPickingPositionFromDepth({ x, y });
     const target = picked || getLookAtECEF();
-    const usingContext = contextModeState.enabled;
 
     if (stencil === stencil2) {
-        const contextTarget = usingContext ? mapFromContext(target, globe2Object3D) : target;
-        const p2 = contextTarget.clone().multiplyScalar(globe2Scale).add(globe2Object3D.position);
+        const p2 = target.clone().multiplyScalar(globe2Scale).add(globe2Object3D.position);
         stencil2.cylinder.setCenterECEF(p2);
     } else {
-        const contextTarget = usingContext ? mapFromContext(target, getGlobe1Root()) : target;
-        stencil1.cylinder.setCenterECEF(contextTarget);
+        stencil1.cylinder.setCenterECEF(target);
     }
-    if (stencil === stencil1 || stencil === stencil2) updateGreenFromBlueRed();
     view.notifyChange(true);
 }
 
@@ -953,25 +736,10 @@ stencil1.ui = createStencilWidget({
         setExclusivePicking(stencil1, active);
         stencil1.ui.setStencilEnabled(!active);
     },
-    onRadius01: (u) => {
-        stencil1.cylinder.setRadiusMeters(radiusFromSlider01(u));
-        updateContextCylinders();
-    },
-    onOpacity: (a) => {
-        stencil1.cylinder.setOpacity(a);
-        updateContextCylinders();
-    },
+    onRadius01: (u) => stencil1.cylinder.setRadiusMeters(radiusFromSlider01(u)),
+    onOpacity: (a) => stencil1.cylinder.setOpacity(a),
     onReset: () => centerCylinderAtScreenCenter(stencil1),
-    onToggleCylinder: (vis) => {
-        if (contextModeState.enabled) {
-            contextModeState.cyl1Visible = vis;
-            stencil1.cylinder.mesh.visible = false;
-            ghostBlue.mesh.visible = vis;
-        } else {
-            stencil1.cylinder.mesh.visible = vis;
-        }
-        view.notifyChange(true);
-    },
+    onToggleCylinder: (vis) => { stencil1.cylinder.mesh.visible = vis; view.notifyChange(true); },
     onToggleStencil: (enabled) => { stencil1.state.stencilEnabled = enabled; stencil1.uniforms.uStencilEnabled.value = enabled ? 1.0 : 0.0; view.notifyChange(true); },
     onLog: () => logMaterialsForRoot(stencil1.patchRoot(), stencil1.id),
     panelStyle: { boxShadow: '0 14px 40px rgba(47, 139, 255, 0.45)', borderColor: '#2f8bff66' },
@@ -985,25 +753,10 @@ stencil2.ui = createStencilWidget({
         setExclusivePicking(stencil2, active);
         stencil2.ui.setStencilEnabled(!active);
     },
-    onRadius01: (u) => {
-        stencil2.cylinder.setRadiusMeters(radiusFromSlider01(u) * globe2Scale);
-        updateContextCylinders();
-    },
-    onOpacity: (a) => {
-        stencil2.cylinder.setOpacity(a);
-        updateContextCylinders();
-    },
+    onRadius01: (u) => stencil2.cylinder.setRadiusMeters(radiusFromSlider01(u) * globe2Scale),
+    onOpacity: (a) => stencil2.cylinder.setOpacity(a),
     onReset: () => centerCylinderAtScreenCenter(stencil2),
-    onToggleCylinder: (vis) => {
-        if (contextModeState.enabled) {
-            contextModeState.cyl2Visible = vis;
-            stencil2.cylinder.mesh.visible = false;
-            ghostRed.mesh.visible = vis;
-        } else {
-            stencil2.cylinder.mesh.visible = vis;
-        }
-        view.notifyChange(true);
-    },
+    onToggleCylinder: (vis) => { stencil2.cylinder.mesh.visible = vis; view.notifyChange(true); },
     onToggleStencil: (enabled) => { stencil2.state.stencilEnabled = enabled; stencil2.uniforms.uStencilEnabled.value = enabled ? 1.0 : 0.0; view.notifyChange(true); },
     onToggleRotate: (active) => {
         stencil2.rotating = active;
@@ -1023,51 +776,10 @@ stencil2.ui = createStencilWidget({
         globe2Object3D.quaternion.identity();
         globe2Object3D.updateMatrixWorld(true);
         view.notifyChange(true);
-        updateGreenFromBlueRed();
     },
     onLog: () => logMaterialsForRoot(stencil2.patchRoot(), stencil2.id),
     panelStyle: { boxShadow: '0 14px 40px rgba(255, 51, 68, 0.45)', borderColor: '#ff334466' },
-    rotateButtonLabel: 'Rotate target',
-});
-
-stencil3.ui = createStencilWidget({
-    idPrefix: stencil3.id,
-    title: stencil3.title,
-    panelPos: stencil3.panelPos,
-    onRadius01: (u) => stencil3.cylinder.setRadiusMeters(radiusFromSlider01(u) * globe3Scale),
-    onOpacity: (a) => stencil3.cylinder.setOpacity(a),
-    onToggleCylinder: (vis) => { stencil3.cylinder.mesh.visible = vis; view.notifyChange(true); },
-    onToggleStencil: (enabled) => { stencil3.state.stencilEnabled = enabled; stencil3.uniforms.uStencilEnabled.value = enabled ? 1.0 : 0.0; view.notifyChange(true); },
-    panelStyle: { boxShadow: '0 14px 40px rgba(46, 204, 113, 0.45)', borderColor: '#2ecc7166' },
-    controls: {
-        pick: false,
-        center: false,
-        log: false,
-        rotate: false,
-        resetGlobe: false,
-        status: false,
-    },
-});
-
-const contextBtn = document.createElement('button');
-contextBtn.id = `${stencil3.id}-context`;
-contextBtn.style.cssText = UI_BUTTON_STYLE;
-contextBtn.textContent = 'Context mode';
-const contextSliderAnchor = stencil3.ui.panel.querySelector('input[type="range"]')?.parentElement;
-if (contextSliderAnchor) {
-    stencil3.ui.panel.insertBefore(contextBtn, contextSliderAnchor);
-} else {
-    stencil3.ui.panel.appendChild(contextBtn);
-}
-
-const setContextButtonState = (enabled) => {
-    contextBtn.classList.toggle('is-active', enabled);
-    contextBtn.textContent = enabled ? 'Context mode on' : 'Context mode';
-};
-contextBtn.addEventListener('click', () => {
-    const next = !contextModeState.enabled;
-    setContextMode(next);
-    setContextButtonState(next);
+    rotateButtonLabel: 'Rotate globe',
 });
 
 function getLookAtECEF() {
@@ -1095,22 +807,14 @@ viewerDiv.addEventListener('click', (event) => {
 
     const picked = view.getPickingPositionFromDepth(view.eventToViewCoords(event));
     if (picked) {
-        if (stencil1.picking) {
-            const target = contextModeState.enabled ? mapFromContext(picked, getGlobe1Root()) : picked;
-            stencil1.cylinder.setCenterECEF(target);
-        }
-        if (stencil2.picking) {
-            const target = contextModeState.enabled ? mapFromContext(picked, globe2Object3D) : picked;
-            stencil2.cylinder.setCenterECEF(target);
-        }
+        if (stencil1.picking) stencil1.cylinder.setCenterECEF(picked);
+        if (stencil2.picking) stencil2.cylinder.setCenterECEF(picked);
         if (stencil2.rotating) {
-            const target = contextModeState.enabled ? mapFromContext(picked, globe2Object3D) : picked;
-            rotateGlobe2ToTarget(target);
+            rotateGlobe2ToTarget(picked);
             stencil2.ui.setStencilEnabled(true);
             stencil2.rotating = false;
             stencil2.ui.setRotateMode(false);
         }
-        if (stencil1.picking || stencil2.picking) updateGreenFromBlueRed();
     }
 
     if (stencil1.picking) { stencil1.picking = false; stencil1.ui.setPicking(false); }
@@ -1135,16 +839,8 @@ view.addFrameRequester(itowns.MAIN_LOOP_EVENTS.BEFORE_RENDER, () => {
         state: stencil2.state,
     });
 
-    const newly3 = patchMeshesUnderRoot({
-        root: stencil3.patchRoot(),
-        stencilId: stencil3.id,
-        uniforms: stencil3.uniforms,
-        state: stencil3.state,
-    });
-
-    if (newly1 > 0 && stencil1.ui.status) stencil1.ui.status.textContent = `Patched tile materials: ${stencil1.state.count}`;
-    if (newly2 > 0 && stencil2.ui.status) stencil2.ui.status.textContent = `Patched tile materials: ${stencil2.state.count}`;
-    if (newly3 > 0 && stencil3.ui.status) stencil3.ui.status.textContent = `Patched tile materials: ${stencil3.state.count}`;
+    if (newly1 > 0) stencil1.ui.status.textContent = `Patched tile materials: ${stencil1.state.count}`;
+    if (newly2 > 0) stencil2.ui.status.textContent = `Patched tile materials: ${stencil2.state.count}`;
 });
 
 // Initialize once globe is ready
@@ -1154,11 +850,9 @@ view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, () => {
     // immediate patch pass
     patchMeshesUnderRoot({ root: stencil1.patchRoot(), stencilId: stencil1.id, uniforms: stencil1.uniforms, state: stencil1.state });
     patchMeshesUnderRoot({ root: stencil2.patchRoot(), stencilId: stencil2.id, uniforms: stencil2.uniforms, state: stencil2.state });
-    patchMeshesUnderRoot({ root: stencil3.patchRoot(), stencilId: stencil3.id, uniforms: stencil3.uniforms, state: stencil3.state });
 
-    if (stencil1.ui.status) stencil1.ui.status.textContent = `Patched tile materials: ${stencil1.state.count}`;
-    if (stencil2.ui.status) stencil2.ui.status.textContent = `Patched tile materials: ${stencil2.state.count}`;
-    if (stencil3.ui.status) stencil3.ui.status.textContent = `Patched tile materials: ${stencil3.state.count}`;
+    stencil1.ui.status.textContent = `Patched tile materials: ${stencil1.state.count}`;
+    stencil2.ui.status.textContent = `Patched tile materials: ${stencil2.state.count}`;
 
     view.notifyChange(true);
 });

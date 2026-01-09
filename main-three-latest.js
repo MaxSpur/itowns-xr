@@ -469,7 +469,7 @@ function makeStencilCylinder(view, uniforms, {
         transparent: true,
         opacity,
         depthWrite: false,
-        depthTest: true,
+        depthTest: false,
         side: THREE.DoubleSide,
     });
 
@@ -749,7 +749,7 @@ function makeGhostCylinder(view, {
         transparent: true,
         opacity,
         depthWrite: false,
-        depthTest: true,
+        depthTest: false,
         side: THREE.DoubleSide,
     });
 
@@ -818,10 +818,6 @@ function mapCenterToGlobe(fromRoot, toRoot, position) {
     toRoot.updateMatrixWorld(true);
     const local = fromRoot.worldToLocal(position.clone());
     return toRoot.localToWorld(local);
-}
-
-function mapFromContext(position, targetRoot) {
-    return mapCenterToGlobe(globe3Object3D, targetRoot, position);
 }
 
 function updateContextCylinders() {
@@ -931,15 +927,12 @@ function centerCylinderAtScreenCenter(stencil) {
     const y = gfx?.height ? gfx.height * 0.5 : viewerDiv.clientHeight * 0.5;
     const picked = view.getPickingPositionFromDepth({ x, y });
     const target = picked || getLookAtECEF();
-    const usingContext = contextModeState.enabled;
 
     if (stencil === stencil2) {
-        const contextTarget = usingContext ? mapFromContext(target, globe2Object3D) : target;
-        const p2 = contextTarget.clone().multiplyScalar(globe2Scale).add(globe2Object3D.position);
+        const p2 = target.clone().multiplyScalar(globe2Scale).add(globe2Object3D.position);
         stencil2.cylinder.setCenterECEF(p2);
     } else {
-        const contextTarget = usingContext ? mapFromContext(target, getGlobe1Root()) : target;
-        stencil1.cylinder.setCenterECEF(contextTarget);
+        stencil1.cylinder.setCenterECEF(target);
     }
     if (stencil === stencil1 || stencil === stencil2) updateGreenFromBlueRed();
     view.notifyChange(true);
@@ -1095,17 +1088,10 @@ viewerDiv.addEventListener('click', (event) => {
 
     const picked = view.getPickingPositionFromDepth(view.eventToViewCoords(event));
     if (picked) {
-        if (stencil1.picking) {
-            const target = contextModeState.enabled ? mapFromContext(picked, getGlobe1Root()) : picked;
-            stencil1.cylinder.setCenterECEF(target);
-        }
-        if (stencil2.picking) {
-            const target = contextModeState.enabled ? mapFromContext(picked, globe2Object3D) : picked;
-            stencil2.cylinder.setCenterECEF(target);
-        }
+        if (stencil1.picking) stencil1.cylinder.setCenterECEF(picked);
+        if (stencil2.picking) stencil2.cylinder.setCenterECEF(picked);
         if (stencil2.rotating) {
-            const target = contextModeState.enabled ? mapFromContext(picked, globe2Object3D) : picked;
-            rotateGlobe2ToTarget(target);
+            rotateGlobe2ToTarget(picked);
             stencil2.ui.setStencilEnabled(true);
             stencil2.rotating = false;
             stencil2.ui.setRotateMode(false);
