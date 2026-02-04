@@ -4,21 +4,19 @@ import * as THREE from 'three';
 export function setupCustomZoomControls({ view, viewerDiv }) {
     if (!view?.controls) return;
 
-    const controls = view.controls;
-
-    controls.zoomFactor = 1.01;
-    controls.enableDamping = true;
-    controls.dampingMoveFactor = 0.12;
-    controls.minDistance = 0.1;
-    controls.handleCollision = false;
-    if (controls.states?.setFromOptions) {
-        controls.states.setFromOptions({
+    view.controls.zoomFactor = 1.01;
+    view.controls.enableDamping = true;
+    view.controls.dampingMoveFactor = 0.12;
+    view.controls.minDistance = 0.1;
+    view.controls.handleCollision = false;
+    if (view.controls.states?.setFromOptions) {
+        view.controls.states.setFromOptions({
             ZOOM: { enable: false },
             TRAVEL_IN: { enable: false },
         });
     }
 
-    if (!controls.lookAtCoordinate) return;
+    if (!view.controls.lookAtCoordinate) return;
 
     const zoomSurface = view.mainLoop?.gfxEngine?.renderer?.domElement
         || view.domElement
@@ -38,15 +36,16 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         const dim = view.mainLoop?.gfxEngine?.getWindowSize?.();
         const scaleX = dim?.x ? dim.x / rect.width : 1;
         const scaleY = dim?.y ? dim.y / rect.height : 1;
-        if (scaleX === 1 && scaleY === 1) return viewCoords;
-        return viewCoords.clone().set(viewCoords.x * scaleX, viewCoords.y * scaleY);
+        viewCoords = viewCoords.clone();
+        viewCoords.set(viewCoords.x * scaleX, viewCoords.y * scaleY);
+        return viewCoords;
     };
 
     zoomSurface.addEventListener('wheel', (event) => {
         event.preventDefault();
         const viewCoords = getScaledViewCoords(event);
-        if (!viewCoords || !controls.handleZoom) return;
-        controls.handleZoom({
+        if (!viewCoords || !view.controls?.handleZoom) return;
+        view.controls.handleZoom({
             type: 'zoom',
             delta: event.deltaY,
             viewCoords,
@@ -55,8 +54,8 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
 
     zoomSurface.addEventListener('dblclick', (event) => {
         const viewCoords = getScaledViewCoords(event);
-        if (!viewCoords || !controls.travel) return;
-        controls.travel({
+        if (!viewCoords || !view.controls?.travel) return;
+        view.controls.travel({
             viewCoords,
             direction: 'in',
         });
