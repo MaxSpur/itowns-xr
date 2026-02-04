@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>iTowns Experimentation</title>
+    <style>
+        html {
+            height: 100%;
+            background: transparent;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            height: 100%;
+            background: transparent;
+        }
+
+        #viewerDiv {
+            margin: auto;
+            height: 100%;
+            width: 100%;
+            padding: 0;
+            background: transparent;
+        }
+
+        canvas {
+            display: block;
+            background: transparent !important;
+        }
+    </style>
+    <link rel="stylesheet" href="./widgets.css">
+</head>
+
+<body>
+    <div id="viewerDiv"></div>
+    <!-- ✅ module entry; Vite resolves imports -->
+    <script type="module" src="./main.js"></script>
+</body>
+
+</html>

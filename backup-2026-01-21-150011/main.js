@@ -3,7 +3,6 @@ import { createSources } from './modules/sources.js';
 import { setupGlobes } from './modules/globes.js';
 import { setupStencilSystem } from './modules/stencil-system.js';
 import { createMainView } from './modules/view-setup.js';
-import { setupCustomZoomControls } from './modules/controls.js';
 
 // ---------- SETUP THE VR VIEW ----------
 
@@ -16,7 +15,13 @@ const placement = {
 
 const viewerDiv = document.getElementById('viewerDiv');
 const view = createMainView(viewerDiv, placement);
-setupCustomZoomControls({ view, viewerDiv });
+if (view.controls) {
+    view.controls.zoomFactor = 1.01;
+    view.controls.enableDamping = true;
+    view.controls.dampingMoveFactor = 0.12;
+    view.controls.minDistance = 1;
+    view.controls.handleCollision = false;
+}
 
 
 // ---------- SOURCES (shared) ----------

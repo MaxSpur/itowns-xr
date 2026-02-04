@@ -3,20 +3,23 @@ import { createSources } from './modules/sources.js';
 import { setupGlobes } from './modules/globes.js';
 import { setupStencilSystem } from './modules/stencil-system.js';
 import { createMainView } from './modules/view-setup.js';
-import { setupCustomZoomControls } from './modules/controls.js';
 
 // ---------- SETUP THE VR VIEW ----------
 
 const placement = {
     coord: new itowns.Coordinates('EPSG:4326', 4.768, 45.537),
-    range: 15000,
-    tilt: 20,
+    range: 0.5,
+    tilt: 80,
     heading: 0,
 };
 
 const viewerDiv = document.getElementById('viewerDiv');
 const view = createMainView(viewerDiv, placement);
-setupCustomZoomControls({ view, viewerDiv });
+if (view.controls) {
+    view.controls.minDistance = 0.1;
+    // view.controls.handleCollision = false;
+    // if (view.controls.setRange) view.controls.setRange(placement.range, false);
+}
 
 
 // ---------- SOURCES (shared) ----------

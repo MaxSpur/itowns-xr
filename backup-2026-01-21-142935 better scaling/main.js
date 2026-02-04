@@ -3,7 +3,6 @@ import { createSources } from './modules/sources.js';
 import { setupGlobes } from './modules/globes.js';
 import { setupStencilSystem } from './modules/stencil-system.js';
 import { createMainView } from './modules/view-setup.js';
-import { setupCustomZoomControls } from './modules/controls.js';
 
 // ---------- SETUP THE VR VIEW ----------
 
@@ -16,7 +15,17 @@ const placement = {
 
 const viewerDiv = document.getElementById('viewerDiv');
 const view = createMainView(viewerDiv, placement);
-setupCustomZoomControls({ view, viewerDiv });
+if (view.controls) {
+    view.controls.zoomFactor = 1.02;
+    view.controls.enableDamping = true;
+    view.controls.dampingMoveFactor = 0.12;
+    view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, () => {
+        const tiltDeg = view.controls.getTilt?.() ?? placement.tilt ?? 80;
+        const tiltRad = tiltDeg * Math.PI / 180;
+        view.controls.minPolarAngle = tiltRad;
+        view.controls.maxPolarAngle = tiltRad;
+    });
+}
 
 
 // ---------- SOURCES (shared) ----------
