@@ -2,9 +2,7 @@ import * as itowns from 'itowns';
 import * as THREE from 'three';
 import { createStencilUniforms, makeGhostCylinder, makeStencilCylinder } from './cylinders.js';
 import { patchMeshesUnderRoot, logMaterialsForRoot } from './patching.js';
-import { createStencilWidget, radiusFromSlider01 } from './ui.js';
-import { rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
-import { attachContextControls, attachScaleControls } from './stencil-ui-extensions.js';
+import { createStencilWidget, radiusFromSlider01, UI_BUTTON_STYLE } from './ui.js';
 
 export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D }) {
     const contextObject3D = contextRoot || view?.tileLayer?.object3d || view?.scene;
@@ -222,10 +220,30 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return computeBearingInContext(p1Context, p2Context);
     }
 
+    function rotateAroundPoint(obj, point, axis, angle) {
+        if (!obj) return;
+        if (axis.lengthSq() < 1e-8 || Math.abs(angle) < 1e-8) return;
+        const q = new THREE.Quaternion().setFromAxisAngle(axis.normalize(), angle);
+        obj.position.sub(point);
+        obj.position.applyQuaternion(q);
+        obj.position.add(point);
+        obj.quaternion.premultiply(q);
+        obj.updateMatrixWorld(true);
+    }
+
     function rotateGlobeAroundStencil(globeRoot, center, angle) {
         if (!globeRoot || !center) return;
         const axis = center.clone().sub(globeRoot.position).normalize();
         rotateAroundPoint(globeRoot, center.clone(), axis, angle);
+    }
+
+    function scaleAroundPoint(obj, point, factor) {
+        if (!obj || !point || !Number.isFinite(factor) || Math.abs(factor - 1) < 1e-6) return;
+        obj.position.sub(point);
+        obj.position.multiplyScalar(factor);
+        obj.position.add(point);
+        obj.scale.multiplyScalar(factor);
+        obj.updateMatrixWorld(true);
     }
 
     function applyGlobeScale(nextScale) {
@@ -602,30 +620,78 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         },
     });
 
-    const { setContextButtonState } = attachContextControls({
-        panel: stencil3.ui.panel,
-        initialEnabled: contextModeState.enabled,
-        onToggle: (next) => setContextMode(next),
-        onReset: () => {
-            originObject3D.quaternion.copy(contextObject3D.quaternion);
-            originObject3D.updateMatrixWorld(true);
-            destinationObject3D.quaternion.copy(contextObject3D.quaternion);
-            destinationObject3D.updateMatrixWorld(true);
-            view.notifyChange(true);
-            updateGreenFromBlueRed();
-        },
-    });
-    updateContextButton = setContextButtonState;
+    const scaleSeparator = document.createElement('div');
+    scaleSeparator.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:6px 0;';
+    const scaleRow = document.createElement('div');
+    scaleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;';
+    const scaleLabel = document.createElement('span');
+    scaleLabel.textContent = 'Scale';
+    const scaleValue = document.createElement('span');
+    scaleValue.textContent = formatScaleRatio(globeScaleState.value);
+    scaleRow.appendChild(scaleLabel);
+    scaleRow.appendChild(scaleValue);
 
-    attachScaleControls({
-        panel: stencil3.ui.panel,
-        initialScale: globeScaleState.value,
-        sliderFromScale: slider01FromScale,
-        scaleFromSlider: scaleFromSlider01,
-        formatScale: formatScaleRatio,
-        onScale: (scale) => {
-            applyGlobeScale(scale);
-        },
+    const scaleInput = document.createElement('input');
+    scaleInput.type = 'range';
+    scaleInput.min = '0';
+    scaleInput.max = '1';
+    scaleInput.step = '0.001';
+    scaleInput.value = '0.5';
+    scaleInput.style.width = '100%';
+
+    const scaleWrap = document.createElement('div');
+    scaleWrap.style.display = 'flex';
+    scaleWrap.style.flexDirection = 'column';
+    scaleWrap.style.gap = '6px';
+    scaleWrap.appendChild(scaleRow);
+    scaleWrap.appendChild(scaleInput);
+
+    const contextBtn = document.createElement('button');
+    contextBtn.id = `${stencil3.id}-context`;
+    contextBtn.style.cssText = UI_BUTTON_STYLE;
+    contextBtn.textContent = 'Context mode';
+    const resetBtn = document.createElement('button');
+    resetBtn.id = `${stencil3.id}-reset-globes`;
+    resetBtn.style.cssText = UI_BUTTON_STYLE;
+    resetBtn.textContent = 'Reset globes';
+    const contextSliderAnchor = stencil3.ui.panel.querySelector('input[type="range"]')?.parentElement;
+    if (contextSliderAnchor) {
+        stencil3.ui.panel.insertBefore(contextBtn, contextSliderAnchor);
+        stencil3.ui.panel.insertBefore(resetBtn, contextSliderAnchor);
+    } else {
+        stencil3.ui.panel.appendChild(contextBtn);
+        stencil3.ui.panel.appendChild(resetBtn);
+    }
+
+    stencil3.ui.panel.appendChild(scaleSeparator);
+    stencil3.ui.panel.appendChild(scaleWrap);
+
+    const setContextButtonState = (enabled) => {
+        contextBtn.classList.toggle('is-active', enabled);
+        contextBtn.textContent = enabled ? 'Context mode on' : 'Context mode';
+    };
+    updateContextButton = setContextButtonState;
+    contextBtn.addEventListener('click', () => {
+        const next = !contextModeState.enabled;
+        setContextMode(next);
+        setContextButtonState(next);
+    });
+    resetBtn.addEventListener('click', () => {
+        originObject3D.quaternion.copy(contextObject3D.quaternion);
+        originObject3D.updateMatrixWorld(true);
+        destinationObject3D.quaternion.copy(contextObject3D.quaternion);
+        destinationObject3D.updateMatrixWorld(true);
+        view.notifyChange(true);
+        updateGreenFromBlueRed();
+    });
+
+    scaleInput.value = `${slider01FromScale(globeScaleState.value)}`;
+    scaleInput.addEventListener('input', (e) => {
+        const u = parseFloat(e.target.value);
+        const scale = scaleFromSlider01(u);
+        scaleValue.textContent = formatScaleRatio(scale);
+        applyGlobeScale(scale);
+        updateAllRadiusLabels();
     });
     updateAllRadiusLabels();
 
