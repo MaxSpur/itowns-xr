@@ -25,6 +25,17 @@ const { orthoSource, elevationSource } = createSources();
 
 // ---------- GLOBES ----------
 
-const { contextRoot, originObject3D, destinationObject3D } = setupGlobes(view, { orthoSource, elevationSource });
+const globeTransforms = {
+    // Example XR placement:
+    // origin: { position: [0, 0, 0], scale: 0.001 },
+    // destination: { position: [0.4, 0, 0], scale: 0.001 },
+    // context: { position: [-0.4, 0, 0], scale: 0.001 },
+};
+
+const { contextRoot, originObject3D, destinationObject3D } = setupGlobes(view, {
+    orthoSource,
+    elevationSource,
+    transforms: globeTransforms,
+});
 
 setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D });
