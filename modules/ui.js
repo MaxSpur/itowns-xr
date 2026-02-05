@@ -9,7 +9,7 @@ export function radiusFromSlider01(u) {
     return VIEW_RADIUS_MIN * Math.pow(k, clamped);
 }
 
-function slider01FromRadius(rMeters) {
+export function slider01FromRadius(rMeters) {
     const clamped = THREE.MathUtils.clamp(+rMeters || VIEW_RADIUS_MIN, VIEW_RADIUS_MIN, VIEW_RADIUS_MAX);
     const k = VIEW_RADIUS_MAX / VIEW_RADIUS_MIN;
     return Math.log(clamped / VIEW_RADIUS_MIN) / Math.log(k);

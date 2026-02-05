@@ -2,7 +2,7 @@ import * as itowns from 'itowns';
 import * as THREE from 'three';
 import { createStencilUniforms, makeGhostCylinder, makeStencilCylinder } from './cylinders.js';
 import { patchMeshesUnderRoot, logMaterialsForRoot } from './patching.js';
-import { createStencilWidget, radiusFromSlider01, formatMeters } from './ui.js';
+import { createStencilWidget, radiusFromSlider01, slider01FromRadius, formatMeters } from './ui.js';
 import { rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
 import { attachContextControls, attachScaleControls, attachDumpControls } from './stencil-ui-extensions.js';
 
@@ -832,20 +832,6 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         };
     }
 
-    function serializeStencil(stencil) {
-        if (!stencil) return null;
-        return {
-            id: stencil.id,
-            centerECEF: serializeVector3(stencil.uniforms?.uStencilCenter?.value),
-            axisECEF: serializeVector3(stencil.uniforms?.uStencilAxis?.value),
-            radiusMeters: stencil.uniforms?.uStencilRadius?.value ?? null,
-            opacity: stencil.cylinder?.mesh?.material?.opacity ?? null,
-            stencilEnabled: stencil.uniforms?.uStencilEnabled?.value ?? null,
-            cylinderVisible: stencil.cylinder?.mesh?.visible ?? null,
-            color: stencil.color ?? null,
-        };
-    }
-
     function serializeCamera() {
         const cam = view?.camera3D;
         if (!cam) return null;
@@ -876,7 +862,64 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         };
     }
 
-    function buildConfigSnapshot() {
+    function stencilCenterToGeo(center) {
+        if (!center) return null;
+        const coord = new itowns.Coordinates(view.referenceCrs, center.x, center.y, center.z);
+        const geo = coord.as('EPSG:4326');
+        return { longitude: geo.longitude, latitude: geo.latitude, altitude: geo.altitude, crs: 'EPSG:4326' };
+    }
+
+    function buildUserConfigSnapshot() {
+        const controls = serializeControls();
+        const placement = controls?.targetGeo ? {
+            coord: controls.targetGeo,
+            range: controls.range,
+            tilt: controls.tilt,
+            heading: controls.heading,
+        } : null;
+        return {
+            version: 1,
+            sources: view?.userData?.sources ?? null,
+            view: {
+                placement,
+                controls,
+                camera: serializeCamera(),
+            },
+            globes: {
+                transforms: view?.userData?.globeTransforms ?? null,
+            },
+            scale: globeScaleState.value,
+            contextMode: { enabled: contextModeState.enabled },
+            stencils: {
+                origin: {
+                    centerECEF: serializeVector3(stencil1.uniforms?.uStencilCenter?.value),
+                    centerGeo: stencilCenterToGeo(stencil1.uniforms?.uStencilCenter?.value),
+                    radiusMeters: stencil1.uniforms?.uStencilRadius?.value ?? null,
+                    opacity: stencil1.cylinder?.mesh?.material?.opacity ?? null,
+                    stencilEnabled: stencil1.uniforms?.uStencilEnabled?.value ?? null,
+                    cylinderVisible: stencil1.cylinder?.mesh?.visible ?? null,
+                },
+                destination: {
+                    centerECEF: serializeVector3(stencil2.uniforms?.uStencilCenter?.value),
+                    centerGeo: stencilCenterToGeo(stencil2.uniforms?.uStencilCenter?.value),
+                    radiusMeters: stencil2.uniforms?.uStencilRadius?.value ?? null,
+                    opacity: stencil2.cylinder?.mesh?.material?.opacity ?? null,
+                    stencilEnabled: stencil2.uniforms?.uStencilEnabled?.value ?? null,
+                    cylinderVisible: stencil2.cylinder?.mesh?.visible ?? null,
+                },
+                context: {
+                    centerECEF: serializeVector3(stencil3.uniforms?.uStencilCenter?.value),
+                    centerGeo: stencilCenterToGeo(stencil3.uniforms?.uStencilCenter?.value),
+                    radiusMeters: stencil3.uniforms?.uStencilRadius?.value ?? null,
+                    opacity: stencil3.cylinder?.mesh?.material?.opacity ?? null,
+                    stencilEnabled: stencil3.uniforms?.uStencilEnabled?.value ?? null,
+                    cylinderVisible: stencil3.cylinder?.mesh?.visible ?? null,
+                },
+            },
+        };
+    }
+
+    function buildDebugSnapshot() {
         return {
             version: 1,
             createdAt: new Date().toISOString(),
@@ -891,9 +934,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 destination: serializeObject3D(destinationObject3D),
             },
             stencils: {
-                origin: serializeStencil(stencil1),
-                destination: serializeStencil(stencil2),
-                context: serializeStencil(stencil3),
+                origin: serializeObject3D(stencil1?.cylinder?.mesh),
+                destination: serializeObject3D(stencil2?.cylinder?.mesh),
+                context: serializeObject3D(stencil3?.cylinder?.mesh),
             },
             contextMode: { ...contextModeState },
             verticalAlign: { ...verticalAlignState },
@@ -903,7 +946,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     }
 
     function dumpConfigSnapshot() {
-        const snapshot = buildConfigSnapshot();
+        const snapshot = buildUserConfigSnapshot();
         console.log('[itowns-xr] config snapshot', snapshot);
         console.log('[itowns-xr] config snapshot JSON:', JSON.stringify(snapshot, null, 2));
         return snapshot;
@@ -928,8 +971,134 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return { targetBearing, positionBearing, desired, angle: counterRotationState.angleRad };
     }
 
+    function coordFromConfig(coord) {
+        if (!coord) return null;
+        const crs = coord.crs || (coord.longitude !== undefined ? 'EPSG:4326' : 'EPSG:4978');
+        if (crs === 'EPSG:4326') {
+            const lon = coord.longitude ?? coord.lon ?? coord.x;
+            const lat = coord.latitude ?? coord.lat ?? coord.y;
+            const alt = coord.altitude ?? coord.alt ?? coord.z ?? 0;
+            if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+            return new itowns.Coordinates('EPSG:4326', lon, lat, alt);
+        }
+        const x = coord.x;
+        const y = coord.y;
+        const z = coord.z;
+        if (![x, y, z].every(Number.isFinite)) return null;
+        return new itowns.Coordinates(crs, x, y, z);
+    }
+
+    function vectorFromCoord(coord) {
+        const c = coordFromConfig(coord);
+        if (!c) return null;
+        const g = c.as(view.referenceCrs);
+        return new THREE.Vector3(g.x, g.y, g.z);
+    }
+
+    function setSliderValue(panel, selector, value) {
+        const input = panel?.querySelector?.(selector);
+        if (!input) return false;
+        input.value = `${value}`;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    function applyStencilConfig(stencil, baseScale, cfg) {
+        if (!cfg || !stencil) return;
+        const center = vectorFromCoord(cfg.centerGeo || cfg.centerECEF || cfg.targetGeo || cfg.targetECEF);
+        if (center) {
+            const root = stencil === stencil1 ? originObject3D
+                : stencil === stencil2 ? destinationObject3D
+                    : contextObject3D;
+            const layer = stencil === stencil1 ? originLayer
+                : stencil === stencil2 ? destinationLayer
+                    : contextLayer;
+            setStencilCenter(stencil, root, layer, center);
+        }
+
+        const radiusMeters = cfg.radiusMeters ?? cfg.viewRadiusMeters ?? cfg.cylinderRadiusMeters;
+        if (Number.isFinite(radiusMeters)) {
+            const baseRadius = radiusMeters / baseScale;
+            const u = slider01FromRadius(baseRadius);
+            stencil.radiusU = u;
+            if (!setSliderValue(stencil.ui?.panel, `#${stencil.id}-r`, u)) {
+                applyRadiusForStencil(stencil, baseScale, u);
+            }
+        }
+
+        if (Number.isFinite(cfg.opacity)) {
+            setSliderValue(stencil.ui?.panel, `#${stencil.id}-o`, cfg.opacity);
+        }
+
+        if (cfg.stencilEnabled !== undefined && stencil.ui?.setStencilEnabled) {
+            stencil.ui.setStencilEnabled(!!cfg.stencilEnabled);
+        }
+
+        if (cfg.cylinderVisible !== undefined) {
+            const visible = !!cfg.cylinderVisible;
+            if (stencil === stencil1) {
+                contextModeState.cyl1Visible = visible;
+            } else if (stencil === stencil2) {
+                contextModeState.cyl2Visible = visible;
+            }
+            if (contextModeState.enabled && (stencil === stencil1 || stencil === stencil2)) {
+                stencil.cylinder.mesh.visible = false;
+                if (stencil === stencil1) ghostBlue.mesh.visible = visible;
+                if (stencil === stencil2) ghostRed.mesh.visible = visible;
+            } else if (stencil === stencil3) {
+                stencil.cylinder.mesh.visible = visible;
+            } else {
+                stencil.cylinder.mesh.visible = visible;
+            }
+            const btn = stencil.ui?.panel?.querySelector?.(`#${stencil.id}-vis`);
+            if (btn) btn.textContent = visible ? 'Hide cyl' : 'Show cyl';
+            updateContextCylinders();
+            view.notifyChange(true);
+        }
+    }
+
+    function applyConfig(config) {
+        if (!config) return;
+        const stencilsCfg = config.stencils || {};
+
+        if (stencilsCfg.origin?.centerGeo || stencilsCfg.origin?.centerECEF || stencilsCfg.origin?.targetGeo || stencilsCfg.origin?.targetECEF) {
+            applyStencilConfig(stencil1, originScale, stencilsCfg.origin);
+        }
+        if (stencilsCfg.destination?.centerGeo || stencilsCfg.destination?.centerECEF || stencilsCfg.destination?.targetGeo || stencilsCfg.destination?.targetECEF) {
+            applyStencilConfig(stencil2, destinationScale, stencilsCfg.destination);
+        }
+
+        if (stencilsCfg.origin || stencilsCfg.destination) {
+            updateGreenFromBlueRed();
+        } else if (stencilsCfg.context) {
+            applyStencilConfig(stencil3, contextScale, stencilsCfg.context);
+        }
+
+        const scale = config.scale ?? config.view?.scale;
+        if (Number.isFinite(scale)) {
+            applyGlobeScale(scale);
+        }
+
+        if (stencilsCfg.origin) applyStencilConfig(stencil1, originScale, stencilsCfg.origin);
+        if (stencilsCfg.destination) applyStencilConfig(stencil2, destinationScale, stencilsCfg.destination);
+        if (stencilsCfg.context) applyStencilConfig(stencil3, contextScale, stencilsCfg.context);
+
+        if (config.contextMode?.enabled !== undefined) {
+            setContextMode(!!config.contextMode.enabled);
+        }
+
+        updateGreenFromBlueRed();
+    }
+
     window.__itownsDumpConfig = dumpConfigSnapshot;
+    window.__itownsDumpDebugState = () => {
+        const snapshot = buildDebugSnapshot();
+        console.log('[itowns-xr] debug snapshot', snapshot);
+        console.log('[itowns-xr] debug snapshot JSON:', JSON.stringify(snapshot, null, 2));
+        return snapshot;
+    };
     window.__itownsCounterRotationDebug = dumpCounterRotation;
+    window.__itownsApplyConfig = applyConfig;
     attachDumpControls({
         panel: stencil3.ui.panel,
         onDump: dumpConfigSnapshot,
@@ -1031,5 +1200,5 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         view.notifyChange(true);
     });
 
-    return { stencil1, stencil2, stencil3, contextModeState };
+    return { stencil1, stencil2, stencil3, contextModeState, applyConfig };
 }

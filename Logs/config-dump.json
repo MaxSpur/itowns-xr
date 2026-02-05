@@ -1,0 +1,133 @@
+{
+    "version": 1,
+    "sources": {
+        "ortho": {
+            "url": "https://data.geopf.fr/wmts?",
+            "crs": "EPSG:3857",
+            "name": "ORTHOIMAGERY.ORTHOPHOTOS",
+            "tileMatrixSet": "PM",
+            "format": "image/jpeg",
+            "zoom": {
+                "min": 0,
+                "max": 18
+            }
+        },
+        "elevation": {
+            "url": "https://data.geopf.fr/wmts?",
+            "crs": "EPSG:4326",
+            "name": "ELEVATION.ELEVATIONGRIDCOVERAGE.SRTM3",
+            "tileMatrixSet": "WGS84G",
+            "format": "image/x-bil;bits=32",
+            "zoom": {
+                "min": 0,
+                "max": 18
+            }
+        }
+    },
+    "view": {
+        "placement": {
+            "coord": {
+                "longitude": 2.3514000000000093,
+                "latitude": 48.85750637319817,
+                "altitude": 67.48336217901999,
+                "crs": "EPSG:4326"
+            },
+            "range": 15000.878132293032,
+            "tilt": 19.998782574859106,
+            "heading": 0
+        },
+        "controls": {
+            "range": 15000.878132293032,
+            "tilt": 19.998782574859106,
+            "heading": 0,
+            "targetECEF": {
+                "x": 4200885.725006215,
+                "y": 172499.82781888667,
+                "z": 4780198.47910598,
+                "crs": "EPSG:4978"
+            },
+            "targetGeo": {
+                "longitude": 2.3514000000000093,
+                "latitude": 48.85750637319817,
+                "altitude": 67.48336217901999,
+                "crs": "EPSG:4326"
+            },
+            "minDistance": 0.1,
+            "maxDistance": 51025096,
+            "zoomFactor": 1.01,
+            "enableDamping": true
+        },
+        "camera": {
+            "position": {
+                "x": 4214846.864856775,
+                "y": 173073.11030692034,
+                "z": 4774740.982793388
+            },
+            "near": 50,
+            "far": 30046429.117222704,
+            "fov": 29.999999999999996,
+            "aspect": 1.8348909657320873,
+            "type": "PerspectiveCamera"
+        }
+    },
+    "globes": {
+        "transforms": {}
+    },
+    "scale": 1,
+    "contextMode": {
+        "enabled": false
+    },
+    "stencils": {
+        "origin": {
+            "centerECEF": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "centerGeo": {
+                "longitude": 0,
+                "latitude": 0,
+                "altitude": 0,
+                "crs": "EPSG:4326"
+            },
+            "radiusMeters": 1496.2905648147896,
+            "opacity": 0.35,
+            "stencilEnabled": 1,
+            "cylinderVisible": true
+        },
+        "destination": {
+            "centerECEF": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "centerGeo": {
+                "longitude": 0,
+                "latitude": 0,
+                "altitude": 0,
+                "crs": "EPSG:4326"
+            },
+            "radiusMeters": 1496.2905648147896,
+            "opacity": 0.35,
+            "stencilEnabled": 1,
+            "cylinderVisible": true
+        },
+        "context": {
+            "centerECEF": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "centerGeo": {
+                "longitude": 0,
+                "latitude": 0,
+                "altitude": 0,
+                "crs": "EPSG:4326"
+            },
+            "radiusMeters": 1496.2905648147896,
+            "opacity": 0.35,
+            "stencilEnabled": 1,
+            "cylinderVisible": true
+        }
+    }
+}
