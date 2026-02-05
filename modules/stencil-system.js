@@ -63,7 +63,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     const contextModePrev = { active: false, owner: null };
     const counterRotationState = { angleRad: 0 };
     const globeScaleState = { value: 1 };
-    const verticalAlignState = { auto: false, method: 'radial' };
+    const verticalAlignState = { auto: true, method: 'radial' };
     const axisTmp = new THREE.Vector3();
     const upAxis = new THREE.Vector3(0, 1, 0);
     const axisQuat = new THREE.Quaternion();
@@ -714,42 +714,6 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     });
     updateContextButton = setContextButtonState;
 
-    const alignRow = document.createElement('div');
-    alignRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center;';
-    const alignSelect = document.createElement('select');
-    alignSelect.style.cssText = 'flex:1; min-width:140px; border-radius:6px; border:1px solid #2e344a; background:rgba(58,61,79,0.45); color:#f4f7ff; padding:6px 8px; font-size:12px;';
-    alignSelect.innerHTML = `
-      <option value="radial">Align: radial axis</option>
-      <option value="world-up">Align: world up</option>
-      <option value="direct">Align: direct</option>
-    `;
-    alignSelect.value = verticalAlignState.method;
-    alignSelect.addEventListener('change', () => {
-        verticalAlignState.method = alignSelect.value;
-    });
-
-    const alignBtn = document.createElement('button');
-    alignBtn.style.cssText = UI_BUTTON_STYLE;
-    alignBtn.textContent = 'Align vertical';
-    alignBtn.addEventListener('click', () => applyVerticalAlignment());
-
-    const autoBtn = document.createElement('button');
-    autoBtn.style.cssText = UI_BUTTON_STYLE;
-    const setAutoText = (enabled) => {
-        autoBtn.classList.toggle('is-active', enabled);
-        autoBtn.textContent = enabled ? 'Auto vertical on' : 'Auto vertical off';
-    };
-    setAutoText(verticalAlignState.auto);
-    autoBtn.addEventListener('click', () => {
-        verticalAlignState.auto = !verticalAlignState.auto;
-        setAutoText(verticalAlignState.auto);
-    });
-
-    alignRow.appendChild(alignSelect);
-    alignRow.appendChild(alignBtn);
-    alignRow.appendChild(autoBtn);
-    stencil3.ui.panel.appendChild(alignRow);
-
     const cylinderRow = document.createElement('div');
     cylinderRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center;';
     const cylinderSelect = document.createElement('select');
@@ -862,6 +826,8 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     // Initialize once globe is ready
     view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, () => {
         initStencilCenters();
+        // One-time cylinder alignment so centers share a common height baseline.
+        alignCylindersToRadius('context');
 
         // immediate patch pass
         patchMeshesUnderRoot({ root: stencil1.patchRoot(), stencilId: stencil1.id, uniforms: stencil1.uniforms, state: stencil1.state });
