@@ -5,6 +5,18 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
     if (!view?.controls) return;
 
     const controls = view.controls;
+    const cam = view.camera3D;
+    const baseNear = Number.isFinite(cam?.near) ? cam.near : 0.1;
+    const baseFar = Number.isFinite(cam?.far) ? cam.far : 1e7;
+    const clipConfig = {
+        minNear: 0.005,
+        maxNear: 50,
+        minFar: 100,
+        maxFar: baseFar,
+        nearRatio: 0.02,
+        nearMaxRatio: 0.25,
+        farRatio: 2000,
+    };
 
     controls.zoomFactor = 1.01;
     controls.enableDamping = true;
@@ -58,6 +70,34 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         return originalLookAt({ ...params, tilt, heading }, isAnimated);
     };
 
+    const updateCameraClipping = () => {
+        const camLocal = view?.camera3D;
+        const target = controls.getCameraTargetPosition?.();
+        if (!camLocal || !target) return;
+        const range = camLocal.position.distanceTo(target);
+        if (!Number.isFinite(range) || range <= 0) return;
+
+        let desiredNear = Math.max(clipConfig.minNear, range * clipConfig.nearRatio);
+        desiredNear = Math.min(desiredNear, range * clipConfig.nearMaxRatio, clipConfig.maxNear);
+
+        let desiredFar = Math.max(clipConfig.minFar, range * clipConfig.farRatio);
+        desiredFar = Math.min(desiredFar, clipConfig.maxFar);
+
+        let changed = false;
+        if (Math.abs(camLocal.near - desiredNear) > 1e-6) {
+            camLocal.near = desiredNear;
+            changed = true;
+        }
+        if (Math.abs(camLocal.far - desiredFar) > 1e-3) {
+            camLocal.far = desiredFar;
+            changed = true;
+        }
+        if (changed) {
+            camLocal.updateProjectionMatrix();
+            view.notifyChange(camLocal);
+        }
+    };
+
     const zoomByFactor = (factor) => {
         const cam = view?.camera3D;
         const target = controls.getCameraTargetPosition?.();
@@ -78,6 +118,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         dir.normalize();
         cam.position.copy(target).add(dir.multiplyScalar(nextRange));
         cam.updateMatrixWorld(true);
+        updateCameraClipping();
         view.notifyChange(cam);
     };
 
@@ -105,6 +146,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         dir.normalize();
         cam.position.copy(target).add(dir.multiplyScalar(nextRange));
         cam.updateMatrixWorld(true);
+        updateCameraClipping();
         view.notifyChange(cam);
     };
 
@@ -139,6 +181,16 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
             if (event?.new?.heading !== undefined) orientationLock.heading = event.new.heading;
         });
     }
+    if (controls.addEventListener && itowns?.CONTROL_EVENTS?.RANGE_CHANGED) {
+        controls.addEventListener(itowns.CONTROL_EVENTS.RANGE_CHANGED, () => {
+            updateCameraClipping();
+        });
+    }
+    if (controls.addEventListener && itowns?.CONTROL_EVENTS?.CAMERA_TARGET_CHANGED) {
+        controls.addEventListener(itowns.CONTROL_EVENTS.CAMERA_TARGET_CHANGED, () => {
+            updateCameraClipping();
+        });
+    }
 
     // Override travel to keep tilt/heading stable.
     controls.travel = (event) => {
@@ -163,6 +215,8 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         event.stopPropagation();
         zoomByFactor(0.6);
     });
+
+    updateCameraClipping();
 }
 
 function setupZoomDebugLogging({ view, controls, zoomSurface }) {
