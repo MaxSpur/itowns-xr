@@ -105,7 +105,8 @@ export function makeGhostCylinder(view, {
 
     function updateFromState() {
         const axis = state.center.lengthSq() > 0 ? state.center.clone().normalize() : new THREE.Vector3(0, 1, 0);
-        state.height = Math.max(1, state.radius * 0.5);
+        // state.height = Math.max(1, state.radius * 0.5);
+        state.height = Math.max(MIN_STENCIL_RADIUS * 0.1, state.radius * 0.5);
         const up = new THREE.Vector3(0, 1, 0);
         mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(up, axis));
         mesh.scale.set(state.radius, state.height, state.radius);
