@@ -47,6 +47,40 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         heading: Number.isFinite(controls.getHeading?.()) ? controls.getHeading() : undefined,
     };
 
+    const originalLookAt = controls.lookAtCoordinate.bind(controls);
+    controls.lookAtCoordinate = (params = {}, isAnimated) => {
+        const tilt = params.tilt !== undefined
+            ? params.tilt
+            : (Number.isFinite(orientationLock.tilt) ? orientationLock.tilt : controls.getTilt?.());
+        const heading = params.heading !== undefined
+            ? params.heading
+            : (Number.isFinite(orientationLock.heading) ? orientationLock.heading : controls.getHeading?.());
+        return originalLookAt({ ...params, tilt, heading }, isAnimated);
+    };
+
+    const zoomByFactor = (factor) => {
+        const cam = view?.camera3D;
+        const target = controls.getCameraTargetPosition?.();
+        if (!cam || !target || !Number.isFinite(factor)) return;
+
+        controls.player?.stop?.();
+        itowns.CameraUtils?.stop?.(view, cam);
+
+        const currentRange = cam.position.distanceTo(target);
+        if (!Number.isFinite(currentRange)) return;
+        const minDistance = Number.isFinite(controls.minDistance) ? controls.minDistance : 0;
+        const maxDistance = Number.isFinite(controls.maxDistance) ? controls.maxDistance : Infinity;
+        const nextRange = THREE.MathUtils.clamp(currentRange * factor, minDistance, maxDistance);
+        if (Math.abs(nextRange - currentRange) < 1e-6) return;
+
+        const dir = cam.position.clone().sub(target);
+        if (dir.lengthSq() < 1e-8) return;
+        dir.normalize();
+        cam.position.copy(target).add(dir.multiplyScalar(nextRange));
+        cam.updateMatrixWorld(true);
+        view.notifyChange(cam);
+    };
+
     const zoomNoTilt = (delta) => {
         const cam = view?.camera3D;
         const target = controls.getCameraTargetPosition?.();
@@ -57,7 +91,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
 
         const zoomFactor = controls.zoomFactor || 1.05;
         // scale with delta magnitude to keep trackpads responsive
-        const zoomScale = Math.pow(zoomFactor, delta * 0.003);
+        const zoomScale = Math.pow(zoomFactor, delta * 0.004);
 
         const currentRange = cam.position.distanceTo(target);
         if (!Number.isFinite(currentRange)) return;
@@ -125,12 +159,9 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
     setupZoomDebugLogging({ view, controls, zoomSurface });
 
     zoomSurface.addEventListener('dblclick', (event) => {
-        const viewCoords = getScaledViewCoords(event);
-        if (!viewCoords || !controls.travel) return;
-        controls.travel({
-            viewCoords,
-            direction: 'in',
-        });
+        event.preventDefault();
+        event.stopPropagation();
+        zoomByFactor(0.6);
     });
 }
 
