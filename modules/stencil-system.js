@@ -2,7 +2,7 @@ import * as itowns from 'itowns';
 import * as THREE from 'three';
 import { createStencilUniforms, makeGhostCylinder, makeStencilCylinder } from './cylinders.js';
 import { patchMeshesUnderRoot, logMaterialsForRoot } from './patching.js';
-import { createStencilWidget, radiusFromSlider01, UI_BUTTON_STYLE } from './ui.js';
+import { createStencilWidget, radiusFromSlider01 } from './ui.js';
 import { rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
 import { attachContextControls, attachScaleControls } from './stencil-ui-extensions.js';
 
@@ -717,30 +717,6 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         },
     });
     updateContextButton = setContextButtonState;
-
-    const cylinderRow = document.createElement('div');
-    cylinderRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center;';
-    const cylinderSelect = document.createElement('select');
-    cylinderSelect.style.cssText = 'flex:1; min-width:160px; border-radius:6px; border:1px solid #2e344a; background:rgba(58,61,79,0.45); color:#f4f7ff; padding:6px 8px; font-size:12px;';
-    cylinderSelect.innerHTML = `
-      <option value="context">Cylinders: match context</option>
-      <option value="average">Cylinders: match average</option>
-      <option value="origin">Cylinders: match origin</option>
-      <option value="destination">Cylinders: match destination</option>
-    `;
-    cylinderSelect.value = cylinderAlignState.target;
-    cylinderSelect.addEventListener('change', () => {
-        cylinderAlignState.target = cylinderSelect.value;
-    });
-    const cylinderBtn = document.createElement('button');
-    cylinderBtn.style.cssText = UI_BUTTON_STYLE;
-    cylinderBtn.textContent = 'Align cylinders';
-    cylinderBtn.addEventListener('click', () => {
-        alignCylindersToRadius(cylinderSelect.value);
-    });
-    cylinderRow.appendChild(cylinderSelect);
-    cylinderRow.appendChild(cylinderBtn);
-    stencil3.ui.panel.appendChild(cylinderRow);
 
     attachScaleControls({
         panel: stencil3.ui.panel,

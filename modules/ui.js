@@ -86,6 +86,20 @@ function ensureUIPanelStyles() {
       transform: scale(1.08);
       border-color: #a7c6ff;
     }
+    .itowns-ui-panel .itowns-ui-header {
+      font-weight: bold;
+      font-size: 14px;
+      border-bottom: 1px solid #555;
+      padding-bottom: 5px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .itowns-ui-panel.is-collapsed .itowns-ui-body {
+      display: none;
+    }
+    .itowns-ui-panel.is-collapsed {
+      padding-bottom: 10px;
+    }
   `;
     document.head.appendChild(style);
 }
@@ -156,41 +170,43 @@ export function createStencilWidget({
         : '';
 
     panel.innerHTML = `
-    <div style="font-weight:bold; font-size:14px; border-bottom:1px solid #555; padding-bottom:5px;">
-      ${title}
-    </div>
+    <div class="itowns-ui-header">${title}</div>
+    <div class="itowns-ui-body">
+      ${pickHtml}
 
-    ${pickHtml}
+      ${actionRowHtml}
 
-    ${actionRowHtml}
+      ${stencilHtml}
+      ${rotateRowHtml}
 
-    ${stencilHtml}
-    ${rotateRowHtml}
-
-    <div style="display:flex; flex-direction:column; gap:6px;">
-      <div style="display:flex; justify-content:space-between;">
-        <span>Radius</span>
-        <span id="${rvId}">${state.radius.toFixed(0)} m</span>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span>Radius</span>
+          <span id="${rvId}">${state.radius.toFixed(0)} m</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; opacity:0.7; font-size:11px;">
+          <span>View radius</span>
+          <span id="${rvRawId}">${state.radius.toFixed(0)} m</span>
+        </div>
+        <input id="${rId}" type="range" min="0" max="1" step="0.001" value="${slider01FromRadius(state.radius)}">
       </div>
-      <div style="display:flex; justify-content:space-between; opacity:0.7; font-size:11px;">
-        <span>View radius</span>
-        <span id="${rvRawId}">${state.radius.toFixed(0)} m</span>
-      </div>
-      <input id="${rId}" type="range" min="0" max="1" step="0.001" value="${slider01FromRadius(state.radius)}">
-    </div>
 
-    <div style="display:flex; flex-direction:column; gap:6px;">
-      <div style="display:flex; justify-content:space-between;">
-        <span>Cylinder opacity</span>
-        <span id="${ovId}">${state.opacity.toFixed(2)}</span>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span>Cylinder opacity</span>
+          <span id="${ovId}">${state.opacity.toFixed(2)}</span>
+        </div>
+        <input id="${oId}" type="range" min="0" max="1" step="0.01" value="${state.opacity}">
       </div>
-      <input id="${oId}" type="range" min="0" max="1" step="0.01" value="${state.opacity}">
-    </div>
 
-    ${statusHtml}
+      ${statusHtml}
+    </div>
   `;
 
     document.body.appendChild(panel);
+
+    const header = panel.querySelector('.itowns-ui-header');
+    const body = panel.querySelector('.itowns-ui-body');
 
     const btnPick = panel.querySelector(`#${pickId}`);
 
@@ -221,6 +237,12 @@ export function createStencilWidget({
         !activeControls.status || status,
     ];
     if (required.some((ok) => !ok)) throw new Error(`[UI] Missing element(s) for widget "${idPrefix}"`);
+
+    if (header && body) {
+        header.addEventListener('click', () => {
+            panel.classList.toggle('is-collapsed');
+        });
+    }
 
     const setPicking = (v) => {
         state.picking = !!v;

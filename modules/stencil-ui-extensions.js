@@ -18,13 +18,14 @@ export function attachContextControls({
     resetBtn.style.cssText = buttonStyle;
     resetBtn.textContent = 'Reset globes';
 
-    const anchor = panel.querySelector(anchorSelector)?.parentElement;
+    const container = panel.querySelector('.itowns-ui-body') || panel;
+    const anchor = container.querySelector(anchorSelector)?.parentElement;
     if (anchor) {
-        panel.insertBefore(contextBtn, anchor);
-        panel.insertBefore(resetBtn, anchor);
+        container.insertBefore(contextBtn, anchor);
+        container.insertBefore(resetBtn, anchor);
     } else {
-        panel.appendChild(contextBtn);
-        panel.appendChild(resetBtn);
+        container.appendChild(contextBtn);
+        container.appendChild(resetBtn);
     }
 
     const setContextButtonState = (enabled) => {
