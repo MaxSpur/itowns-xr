@@ -300,8 +300,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     }
 
     function computeScaledRadius(u, baseScale) {
-        const scale = globeScaleState.value || 1;
-        return (radiusFromSlider01(u) * baseScale) / scale;
+        return radiusFromSlider01(u) * baseScale;
     }
 
     function applyRadiusForStencil(stencil, baseScale, u) {
@@ -424,16 +423,15 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const p2 = stencil2.uniforms.uStencilCenter.value;
         if (p1) setGhostCenter(ghostBlue, contextObject3D, mapCenterToGlobe(originObject3D, contextObject3D, p1));
         if (p2) setGhostCenter(ghostRed, contextObject3D, mapCenterToGlobe(destinationObject3D, contextObject3D, p2));
-        const scale = globeScaleState.value || 1;
         const u1 = getStencilRadiusU(stencil1);
         const u2 = getStencilRadiusU(stencil2);
         if (Number.isFinite(u1)) {
             const base1 = radiusFromSlider01(u1);
-            ghostBlue.setRadiusMeters((base1 * contextScale) / scale);
+            ghostBlue.setRadiusMeters(base1 * contextScale);
         }
         if (Number.isFinite(u2)) {
             const base2 = radiusFromSlider01(u2);
-            ghostRed.setRadiusMeters((base2 * contextScale) / scale);
+            ghostRed.setRadiusMeters(base2 * contextScale);
         }
         ghostBlue.setOpacity(stencil1.cylinder.mesh.material.opacity);
         ghostRed.setOpacity(stencil2.cylinder.mesh.material.opacity);
