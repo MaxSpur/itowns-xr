@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 
+const tmpCenter = new THREE.Vector3();
+const tmpAxis = new THREE.Vector3();
+const tmpAxisPoint = new THREE.Vector3();
+const tmpScale = new THREE.Vector3();
+
 function getOutputVar(fragmentShader) {
     if (fragmentShader.includes('gl_FragColor')) return 'gl_FragColor';
     const m1 = fragmentShader.match(/layout\s*\(\s*location\s*=\s*\d+\s*\)\s*out\s+vec4\s+(\w+)\s*;/);
@@ -48,16 +53,23 @@ function patchLayeredMaterialInPlace(material, stencilId, uniforms) {
     const outVar = getOutputVar(material.fragmentShader);
     if (!outVar) return false;
 
-    // Vertex patch: add vWorldPos varying + assign before project_vertex
-    if (!material.vertexShader.includes('varying vec3 vWorldPos')) {
-        const vDecl = `\nvarying vec3 vWorldPos;\n`;
+    // Vertex patch: add vWorldPos/vStencilLocalPos varyings + assign before project_vertex
+    const needsWorldPos = !material.vertexShader.includes('varying vec3 vWorldPos');
+    const needsLocalPos = !material.vertexShader.includes('varying vec3 vStencilLocalPos');
+    if (needsWorldPos || needsLocalPos) {
+        const vDecl = `\n${needsWorldPos ? 'varying vec3 vWorldPos;\n' : ''}${needsLocalPos ? 'varying vec3 vStencilLocalPos;\n' : ''}`;
         let vs = insertAfterVersion(material.vertexShader, vDecl);
-
         if (vs.includes('#include <project_vertex>')) {
-            vs = vs.replace(
-                '#include <project_vertex>',
-                `vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#include <project_vertex>`
-            );
+            let inject = '';
+            if (!vs.includes('vStencilLocalPos = transformed')) {
+                inject += 'vStencilLocalPos = transformed;\n';
+            }
+            if (!vs.includes('vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz')) {
+                inject += 'vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n';
+            }
+            if (inject) {
+                vs = vs.replace('#include <project_vertex>', `${inject}#include <project_vertex>`);
+            }
         } else {
             return false;
         }
@@ -71,9 +83,14 @@ function patchLayeredMaterialInPlace(material, stencilId, uniforms) {
 uniform vec3  uStencilCenter;
 uniform vec3  uStencilAxis;
 uniform float uStencilRadius;
+uniform vec3  uStencilCenterLocal;
+uniform vec3  uStencilAxisLocal;
+uniform float uStencilRadiusLocal;
+uniform float uStencilUseLocal;
 uniform float uStencilEnabled;
 uniform float uStencilDiscardOutside;
 varying vec3  vWorldPos;
+varying vec3  vStencilLocalPos;
 `;
         let fs = insertAfterVersion(material.fragmentShader, fDecl);
 
@@ -86,11 +103,13 @@ varying vec3  vWorldPos;
         const inject = `
 #if MODE == MODE_FINAL
   if (uStencilEnabled > 0.5) {
-    vec3 _d = vWorldPos - uStencilCenter;
-    float _h = dot(_d, uStencilAxis);
-    vec3 _rad = _d - _h * uStencilAxis;
+    vec3 _d = (uStencilUseLocal > 0.5) ? (vStencilLocalPos - uStencilCenterLocal) : (vWorldPos - uStencilCenter);
+    vec3 _axis = (uStencilUseLocal > 0.5) ? uStencilAxisLocal : uStencilAxis;
+    float _r = (uStencilUseLocal > 0.5) ? uStencilRadiusLocal : uStencilRadius;
+    float _h = dot(_d, _axis);
+    vec3 _rad = _d - _h * _axis;
     float _r2 = dot(_rad, _rad);
-    float _inside = step(_r2, uStencilRadius * uStencilRadius);
+    float _inside = step(_r2, _r * _r);
     if (uStencilDiscardOutside > 0.5) {
       if (_inside < 0.5) discard;
     } else {
@@ -110,6 +129,10 @@ varying vec3  vWorldPos;
     material.uniforms.uStencilRadius = uniforms.uStencilRadius;
     material.uniforms.uStencilEnabled = uniforms.uStencilEnabled;
     material.uniforms.uStencilDiscardOutside = uniforms.uStencilDiscardOutside;
+    material.uniforms.uStencilCenterLocal = material.uniforms.uStencilCenterLocal || { value: new THREE.Vector3() };
+    material.uniforms.uStencilAxisLocal = material.uniforms.uStencilAxisLocal || { value: new THREE.Vector3(0, 1, 0) };
+    material.uniforms.uStencilRadiusLocal = material.uniforms.uStencilRadiusLocal || { value: uniforms.uStencilRadius.value };
+    material.uniforms.uStencilUseLocal = material.uniforms.uStencilUseLocal || { value: 1.0 };
 
     material.userData = material.userData || {};
     material.userData.__stencilPatchedFor = stencilId;
@@ -145,11 +168,15 @@ export function patchMeshesUnderRoot({ root, stencilId, uniforms, state }) {
         }
 
         const keyMat = mesh.material;
-        if (state.patched.has(keyMat)) return;
+        if (state.patched.has(keyMat)) {
+            updateLocalStencilUniforms(mesh, keyMat, uniforms);
+            return;
+        }
 
         if (patchLayeredMaterialInPlace(keyMat, stencilId, uniforms)) {
             state.patched.add(keyMat);
             newlyPatched++;
+            updateLocalStencilUniforms(mesh, keyMat, uniforms);
             if (!keyMat.userData.__disposeHooked) {
                 keyMat.addEventListener('dispose', () => {
                     if (state.patched.has(keyMat)) {
@@ -164,6 +191,38 @@ export function patchMeshesUnderRoot({ root, stencilId, uniforms, state }) {
 
     state.count += newlyPatched;
     return newlyPatched;
+}
+
+function updateLocalStencilUniforms(mesh, material, uniforms) {
+    if (!mesh || !material?.uniforms || !uniforms) return;
+    const centerWorld = uniforms.uStencilCenter?.value;
+    const axisWorld = uniforms.uStencilAxis?.value;
+    const radiusWorld = uniforms.uStencilRadius?.value;
+    if (!centerWorld || !axisWorld || !Number.isFinite(radiusWorld)) return;
+
+    tmpCenter.copy(centerWorld);
+    mesh.worldToLocal(tmpCenter);
+    if (material.uniforms.uStencilCenterLocal) {
+        material.uniforms.uStencilCenterLocal.value.copy(tmpCenter);
+    }
+
+    tmpAxisPoint.copy(centerWorld).add(axisWorld);
+    mesh.worldToLocal(tmpAxisPoint);
+    tmpAxis.copy(tmpAxisPoint).sub(tmpCenter);
+    if (tmpAxis.lengthSq() < 1e-10) tmpAxis.set(0, 1, 0);
+    else tmpAxis.normalize();
+    if (material.uniforms.uStencilAxisLocal) {
+        material.uniforms.uStencilAxisLocal.value.copy(tmpAxis);
+    }
+
+    mesh.getWorldScale(tmpScale);
+    const scale = (tmpScale.x + tmpScale.y + tmpScale.z) / 3 || 1;
+    if (material.uniforms.uStencilRadiusLocal) {
+        material.uniforms.uStencilRadiusLocal.value = radiusWorld / scale;
+    }
+    if (material.uniforms.uStencilUseLocal) {
+        material.uniforms.uStencilUseLocal.value = 1.0;
+    }
 }
 
 export function logMaterialsForRoot(root, label) {
