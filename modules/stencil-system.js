@@ -64,6 +64,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     const counterRotationState = { angleRad: 0 };
     const globeScaleState = { value: 1 };
     const verticalAlignState = { auto: true, method: 'radial' };
+    const cylinderAlignState = { auto: true, target: 'context' };
     const axisTmp = new THREE.Vector3();
     const upAxis = new THREE.Vector3(0, 1, 0);
     const axisQuat = new THREE.Quaternion();
@@ -452,6 +453,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         contextObject3D.quaternion.copy(tempQuat);
         contextObject3D.updateMatrixWorld(true);
 
+        if (cylinderAlignState.auto) {
+            alignCylindersToRadius(cylinderAlignState.target);
+        }
         if (!contextModeState.enabled) {
             applyCounterRotation();
             const q1Aligned = originObject3D ? originObject3D.quaternion : identityQuat;
@@ -724,6 +728,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
       <option value="origin">Cylinders: match origin</option>
       <option value="destination">Cylinders: match destination</option>
     `;
+    cylinderSelect.value = cylinderAlignState.target;
+    cylinderSelect.addEventListener('change', () => {
+        cylinderAlignState.target = cylinderSelect.value;
+    });
     const cylinderBtn = document.createElement('button');
     cylinderBtn.style.cssText = UI_BUTTON_STYLE;
     cylinderBtn.textContent = 'Align cylinders';
