@@ -2,9 +2,9 @@ import * as itowns from 'itowns';
 import * as THREE from 'three';
 import { createStencilUniforms, makeGhostCylinder, makeStencilCylinder } from './cylinders.js';
 import { patchMeshesUnderRoot, logMaterialsForRoot } from './patching.js';
-import { createStencilWidget, radiusFromSlider01 } from './ui.js';
+import { createStencilWidget, radiusFromSlider01, formatMeters } from './ui.js';
 import { rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
-import { attachContextControls, attachScaleControls } from './stencil-ui-extensions.js';
+import { attachContextControls, attachScaleControls, attachDumpControls } from './stencil-ui-extensions.js';
 
 export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D }) {
     const contextObject3D = contextRoot || view?.tileLayer?.object3d || view?.scene;
@@ -278,8 +278,8 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const scale = currentScale || globeScaleState.value || 1;
         const baseRadius = radiusFromSlider01(u) * baseScale;
         const radius = baseRadius / scale;
-        label.textContent = `${radius.toFixed(0)} m`;
-        if (rawLabel) rawLabel.textContent = `${baseRadius.toFixed(0)} m`;
+        label.textContent = formatMeters(radius);
+        if (rawLabel) rawLabel.textContent = formatMeters(baseRadius);
     }
 
     function updateAllRadiusLabels() {
@@ -287,6 +287,36 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (stencil1.ui?.panel) updateRadiusLabelForScale(stencil1.ui.panel, stencil1.id, originScale, scale);
         if (stencil2.ui?.panel) updateRadiusLabelForScale(stencil2.ui.panel, stencil2.id, destinationScale, scale);
         if (stencil3.ui?.panel) updateRadiusLabelForScale(stencil3.ui.panel, stencil3.id, contextScale, scale);
+    }
+
+    function getStencilRadiusU(stencil) {
+        if (!stencil) return NaN;
+        if (Number.isFinite(stencil.radiusU)) return stencil.radiusU;
+        const input = stencil.ui?.panel?.querySelector?.(`#${stencil.id}-r`);
+        if (!input) return NaN;
+        const u = parseFloat(input.value);
+        if (Number.isFinite(u)) stencil.radiusU = u;
+        return u;
+    }
+
+    function computeScaledRadius(u, baseScale) {
+        const scale = globeScaleState.value || 1;
+        return (radiusFromSlider01(u) * baseScale) / scale;
+    }
+
+    function applyRadiusForStencil(stencil, baseScale, u) {
+        const val = Number.isFinite(u) ? u : getStencilRadiusU(stencil);
+        if (!Number.isFinite(val)) return;
+        stencil.radiusU = val;
+        stencil.cylinder.setRadiusMeters(computeScaledRadius(val, baseScale));
+    }
+
+    function applyAllStencilRadii() {
+        applyRadiusForStencil(stencil1, originScale);
+        applyRadiusForStencil(stencil2, destinationScale);
+        applyRadiusForStencil(stencil3, contextScale);
+        updateContextCylinders();
+        updateAllRadiusLabels();
     }
 
     function projectToScreen(worldPos) {
@@ -345,7 +375,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             updateAxisForCenter(ghostRed.mesh.position, contextObject3D, null, ghostRed.mesh);
         }
         updateGreenFromBlueRed();
-        updateAllRadiusLabels();
+        applyAllStencilRadii();
         view.notifyChange(true);
     }
 
@@ -353,6 +383,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (contextModeState.enabled) return;
         const targetBearing = computeTargetBearing();
         const positionBearing = computePositionBearing();
+        if (!Number.isFinite(targetBearing) || !Number.isFinite(positionBearing)) return;
         const desired = -(targetBearing + positionBearing);
         const delta = desired - counterRotationState.angleRad;
         if (Math.abs(delta) < 1e-6) return;
@@ -393,11 +424,17 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const p2 = stencil2.uniforms.uStencilCenter.value;
         if (p1) setGhostCenter(ghostBlue, contextObject3D, mapCenterToGlobe(originObject3D, contextObject3D, p1));
         if (p2) setGhostCenter(ghostRed, contextObject3D, mapCenterToGlobe(destinationObject3D, contextObject3D, p2));
-
-        const baseRadius1 = stencil1.uniforms.uStencilRadius.value / originScale;
-        const baseRadius2 = stencil2.uniforms.uStencilRadius.value / destinationScale;
-        ghostBlue.setRadiusMeters(baseRadius1 * contextScale);
-        ghostRed.setRadiusMeters(baseRadius2 * contextScale);
+        const scale = globeScaleState.value || 1;
+        const u1 = getStencilRadiusU(stencil1);
+        const u2 = getStencilRadiusU(stencil2);
+        if (Number.isFinite(u1)) {
+            const base1 = radiusFromSlider01(u1);
+            ghostBlue.setRadiusMeters((base1 * contextScale) / scale);
+        }
+        if (Number.isFinite(u2)) {
+            const base2 = radiusFromSlider01(u2);
+            ghostRed.setRadiusMeters((base2 * contextScale) / scale);
+        }
         ghostBlue.setOpacity(stencil1.cylinder.mesh.material.opacity);
         ghostRed.setOpacity(stencil2.cylinder.mesh.material.opacity);
         ghostBlue.mesh.visible = contextModeState.cyl1Visible;
@@ -494,6 +531,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     }
 
     function rotateGlobe2ToTarget(targetECEF) {
+        if (!contextModeState.enabled) {
+            clearCounterRotation();
+        }
         const desired = stencil2.uniforms.uStencilCenter.value;
         if (!desired) return;
         const center = new THREE.Vector3();
@@ -510,6 +550,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     }
 
     function rotateGlobe1ToTarget(targetECEF) {
+        if (!contextModeState.enabled) {
+            clearCounterRotation();
+        }
         const desired = stencil1.uniforms.uStencilCenter.value;
         if (!desired || !originObject3D) return;
         const center = new THREE.Vector3();
@@ -528,6 +571,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     function repositionMaskWithRotation({ stencil, targetWorld, globeRoot }) {
         const desired = stencil.uniforms.uStencilCenter.value;
         if (!desired || !targetWorld) return;
+        if (!contextModeState.enabled && (stencil === stencil1 || stencil === stencil2)) {
+            clearCounterRotation();
+        }
         if (globeRoot) {
             const center = new THREE.Vector3();
             globeRoot.getWorldPosition(center);
@@ -594,7 +640,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             }
         },
         onRadius01: (u) => {
-            stencil1.cylinder.setRadiusMeters(radiusFromSlider01(u) * originScale);
+            applyRadiusForStencil(stencil1, originScale, u);
             updateContextCylinders();
             updateAllRadiusLabels();
         },
@@ -629,7 +675,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         },
         pickButtonLabel: 'Reposition mask',
         onRadius01: (u) => {
-            stencil2.cylinder.setRadiusMeters(radiusFromSlider01(u) * destinationScale);
+            applyRadiusForStencil(stencil2, destinationScale, u);
             updateContextCylinders();
             updateAllRadiusLabels();
         },
@@ -686,7 +732,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         title: stencil3.title,
         panelPos: stencil3.panelPos,
         onRadius01: (u) => {
-            stencil3.cylinder.setRadiusMeters(radiusFromSlider01(u) * contextScale);
+            applyRadiusForStencil(stencil3, contextScale, u);
             updateAllRadiusLabels();
         },
         onOpacity: (a) => stencil3.cylinder.setOpacity(a),
@@ -718,7 +764,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     });
     updateContextButton = setContextButtonState;
 
-    attachScaleControls({
+    const scaleUi = attachScaleControls({
         panel: stencil3.ui.panel,
         initialScale: globeScaleState.value,
         sliderFromScale: slider01FromScale,
@@ -728,7 +774,131 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             applyGlobeScale(scale);
         },
     });
-    updateAllRadiusLabels();
+    applyAllStencilRadii();
+
+    function serializeVector3(v) {
+        if (!v) return null;
+        return { x: v.x, y: v.y, z: v.z };
+    }
+
+    function serializeQuaternion(q) {
+        if (!q) return null;
+        return { x: q.x, y: q.y, z: q.z, w: q.w };
+    }
+
+    function serializeObject3D(obj) {
+        if (!obj) return null;
+        return {
+            position: serializeVector3(obj.position),
+            quaternion: serializeQuaternion(obj.quaternion),
+            scale: serializeVector3(obj.scale),
+            visible: obj.visible,
+        };
+    }
+
+    function serializeStencil(stencil) {
+        if (!stencil) return null;
+        return {
+            id: stencil.id,
+            centerECEF: serializeVector3(stencil.uniforms?.uStencilCenter?.value),
+            axisECEF: serializeVector3(stencil.uniforms?.uStencilAxis?.value),
+            radiusMeters: stencil.uniforms?.uStencilRadius?.value ?? null,
+            opacity: stencil.cylinder?.mesh?.material?.opacity ?? null,
+            stencilEnabled: stencil.uniforms?.uStencilEnabled?.value ?? null,
+            cylinderVisible: stencil.cylinder?.mesh?.visible ?? null,
+            color: stencil.color ?? null,
+        };
+    }
+
+    function serializeCamera() {
+        const cam = view?.camera3D;
+        if (!cam) return null;
+        return {
+            position: serializeVector3(cam.position),
+            near: cam.near,
+            far: cam.far,
+            fov: cam.fov,
+            aspect: cam.aspect,
+            type: cam.type,
+        };
+    }
+
+    function serializeControls() {
+        const targetCoord = view.controls?.getLookAtCoordinate?.();
+        const targetECEF = targetCoord?.as?.(view.referenceCrs);
+        const targetGeo = targetCoord?.as?.('EPSG:4326');
+        return {
+            range: view.controls?.getRange?.() ?? null,
+            tilt: view.controls?.getTilt?.() ?? null,
+            heading: view.controls?.getHeading?.() ?? null,
+            targetECEF: targetECEF ? { x: targetECEF.x, y: targetECEF.y, z: targetECEF.z, crs: view.referenceCrs } : null,
+            targetGeo: targetGeo ? { longitude: targetGeo.longitude, latitude: targetGeo.latitude, altitude: targetGeo.altitude, crs: 'EPSG:4326' } : null,
+            minDistance: view.controls?.minDistance ?? null,
+            maxDistance: view.controls?.maxDistance ?? null,
+            zoomFactor: view.controls?.zoomFactor ?? null,
+            enableDamping: view.controls?.enableDamping ?? null,
+        };
+    }
+
+    function buildConfigSnapshot() {
+        return {
+            version: 1,
+            createdAt: new Date().toISOString(),
+            referenceCrs: view.referenceCrs,
+            scale: globeScaleState.value,
+            scaleSlider01: slider01FromScale(globeScaleState.value),
+            camera: serializeCamera(),
+            controls: serializeControls(),
+            globes: {
+                context: serializeObject3D(contextObject3D),
+                origin: serializeObject3D(originObject3D),
+                destination: serializeObject3D(destinationObject3D),
+            },
+            stencils: {
+                origin: serializeStencil(stencil1),
+                destination: serializeStencil(stencil2),
+                context: serializeStencil(stencil3),
+            },
+            contextMode: { ...contextModeState },
+            verticalAlign: { ...verticalAlignState },
+            cylinderAlign: { ...cylinderAlignState },
+            counterRotationAngleRad: counterRotationState.angleRad,
+        };
+    }
+
+    function dumpConfigSnapshot() {
+        const snapshot = buildConfigSnapshot();
+        console.log('[itowns-xr] config snapshot', snapshot);
+        console.log('[itowns-xr] config snapshot JSON:', JSON.stringify(snapshot, null, 2));
+        return snapshot;
+    }
+
+    function dumpCounterRotation() {
+        const targetBearing = computeTargetBearing();
+        const positionBearing = computePositionBearing();
+        const desired = -(targetBearing + positionBearing);
+        const toDeg = (v) => (Number.isFinite(v) ? (v * 180) / Math.PI : v);
+        console.log('[itowns-xr] counter-rotation', {
+            targetBearingRad: targetBearing,
+            targetBearingDeg: toDeg(targetBearing),
+            positionBearingRad: positionBearing,
+            positionBearingDeg: toDeg(positionBearing),
+            desiredRad: desired,
+            desiredDeg: toDeg(desired),
+            currentAngleRad: counterRotationState.angleRad,
+            currentAngleDeg: toDeg(counterRotationState.angleRad),
+            contextMode: contextModeState.enabled,
+        });
+        return { targetBearing, positionBearing, desired, angle: counterRotationState.angleRad };
+    }
+
+    window.__itownsDumpConfig = dumpConfigSnapshot;
+    window.__itownsCounterRotationDebug = dumpCounterRotation;
+    attachDumpControls({
+        panel: stencil3.ui.panel,
+        onDump: dumpConfigSnapshot,
+        anchorSelector: 'input[type="range"]',
+    });
 
     function getLookAtECEF() {
         const c = view.controls.getLookAtCoordinate();

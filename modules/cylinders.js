@@ -10,6 +10,8 @@ export function createStencilUniforms(initialRadiusMeters) {
     };
 }
 
+const MIN_STENCIL_RADIUS = 0.01;
+
 export function makeStencilCylinder(view, uniforms, {
     radius = 1500,
     opacity = 0.35,
@@ -62,7 +64,7 @@ export function makeStencilCylinder(view, uniforms, {
             updateFromState();
         },
         setRadiusMeters(r) {
-            state.radius = Math.max(1, +r || 1);
+            state.radius = Math.max(MIN_STENCIL_RADIUS, +r || MIN_STENCIL_RADIUS);
             updateFromState();
         },
         setOpacity(a) {
@@ -119,7 +121,7 @@ export function makeGhostCylinder(view, {
             updateFromState();
         },
         setRadiusMeters(r) {
-            state.radius = Math.max(1, +r || 1);
+            state.radius = Math.max(MIN_STENCIL_RADIUS, +r || MIN_STENCIL_RADIUS);
             updateFromState();
         },
         setOpacity(a) {

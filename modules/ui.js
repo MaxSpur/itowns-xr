@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const VIEW_RADIUS_MIN = 1;
+const VIEW_RADIUS_MIN = 0.05;
 const VIEW_RADIUS_MAX = 20000;
 
 export function radiusFromSlider01(u) {
@@ -13,6 +13,18 @@ function slider01FromRadius(rMeters) {
     const clamped = THREE.MathUtils.clamp(+rMeters || VIEW_RADIUS_MIN, VIEW_RADIUS_MIN, VIEW_RADIUS_MAX);
     const k = VIEW_RADIUS_MAX / VIEW_RADIUS_MIN;
     return Math.log(clamped / VIEW_RADIUS_MIN) / Math.log(k);
+}
+
+export function formatMeters(value) {
+    if (!Number.isFinite(value)) return '--';
+    if (value < 1) {
+        const cm = value * 100;
+        const precision = cm < 10 ? 1 : 0;
+        return `${cm.toFixed(precision)} cm`;
+    }
+    if (value < 10) return `${value.toFixed(2)} m`;
+    if (value < 100) return `${value.toFixed(1)} m`;
+    return `${value.toFixed(0)} m`;
 }
 
 const PANEL_BASE_STYLE = {
@@ -182,11 +194,11 @@ export function createStencilWidget({
       <div style="display:flex; flex-direction:column; gap:6px;">
         <div style="display:flex; justify-content:space-between;">
           <span>Radius</span>
-          <span id="${rvId}">${state.radius.toFixed(0)} m</span>
+          <span id="${rvId}">${formatMeters(state.radius)}</span>
         </div>
         <div style="display:flex; justify-content:space-between; opacity:0.7; font-size:11px;">
           <span>View radius</span>
-          <span id="${rvRawId}">${state.radius.toFixed(0)} m</span>
+          <span id="${rvRawId}">${formatMeters(state.radius)}</span>
         </div>
         <input id="${rId}" type="range" min="0" max="1" step="0.001" value="${slider01FromRadius(state.radius)}">
       </div>
@@ -255,8 +267,8 @@ export function createStencilWidget({
     radiusInput.addEventListener('input', (e) => {
         const u = parseFloat(e.target.value);
         state.radius = radiusFromSlider01(u);
-        radiusLabel.textContent = `${state.radius.toFixed(0)} m`;
-        if (radiusRawLabel) radiusRawLabel.textContent = `${state.radius.toFixed(0)} m`;
+        radiusLabel.textContent = formatMeters(state.radius);
+        if (radiusRawLabel) radiusRawLabel.textContent = formatMeters(state.radius);
         onRadius01?.(u);
     });
 

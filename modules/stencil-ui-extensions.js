@@ -99,3 +99,27 @@ export function attachScaleControls({
 
     return { scaleInput, scaleValue, setScale };
 }
+
+export function attachDumpControls({
+    panel,
+    onDump,
+    label = 'Dump config',
+    buttonStyle = UI_BUTTON_STYLE,
+    anchorSelector,
+}) {
+    if (!panel) return { dumpBtn: null };
+    const dumpBtn = document.createElement('button');
+    dumpBtn.style.cssText = buttonStyle;
+    dumpBtn.textContent = label;
+
+    const container = panel.querySelector('.itowns-ui-body') || panel;
+    const anchor = anchorSelector ? container.querySelector(anchorSelector) : null;
+    if (anchor?.parentElement) {
+        container.insertBefore(dumpBtn, anchor.parentElement);
+    } else {
+        container.appendChild(dumpBtn);
+    }
+
+    dumpBtn.addEventListener('click', () => onDump?.());
+    return { dumpBtn };
+}
