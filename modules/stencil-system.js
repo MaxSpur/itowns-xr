@@ -104,10 +104,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function setStencilCenter(stencil, globeRoot, layer, position) {
         stencil.cylinder.setCenterECEF(position);
-        if (verticalAlignState.auto) {
-            alignGlobeToTerrain(globeRoot, layer, position);
-        }
         updateAxisForCenter(stencil.uniforms.uStencilCenter.value, globeRoot, stencil.uniforms, stencil.cylinder.mesh);
+        if (verticalAlignState.auto) {
+            applyVerticalAlignment(verticalAlignState.method);
+        }
     }
 
     function setGhostCenter(ghost, globeRoot, position) {
@@ -334,9 +334,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         scaleAroundPoint(destinationObject3D, stencil2.uniforms.uStencilCenter.value, factor);
         scaleAroundPoint(contextObject3D, stencil3.uniforms.uStencilCenter.value, factor);
         if (verticalAlignState.auto) {
-            alignGlobeToTerrain(originObject3D, originLayer, stencil1.uniforms.uStencilCenter.value);
-            alignGlobeToTerrain(destinationObject3D, destinationLayer, stencil2.uniforms.uStencilCenter.value);
-            alignGlobeToTerrain(contextObject3D, contextLayer, stencil3.uniforms.uStencilCenter.value);
+            applyVerticalAlignment(verticalAlignState.method);
         }
         updateAxisForCenter(stencil1.uniforms.uStencilCenter.value, originObject3D, stencil1.uniforms, stencil1.cylinder.mesh);
         updateAxisForCenter(stencil2.uniforms.uStencilCenter.value, destinationObject3D, stencil2.uniforms, stencil2.cylinder.mesh);
