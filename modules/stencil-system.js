@@ -14,6 +14,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     const pickRaycaster = new THREE.Raycaster();
     const pickNdc = new THREE.Vector2();
     const pickEllipsoid = new itowns.Ellipsoid();
+    const baseEllipsoidSize = pickEllipsoid.size.clone();
     const originLayer = view.getLayerById?.('origin_globe');
     const destinationLayer = view.getLayerById?.('destination_globe');
     const contextLayer = view.tileLayer;
@@ -68,6 +69,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     const axisTmp = new THREE.Vector3();
     const upAxis = new THREE.Vector3(0, 1, 0);
     const axisQuat = new THREE.Quaternion();
+    const contextPosTmp = new THREE.Vector3();
+    const contextScaleTmp = new THREE.Vector3();
+    const contextQuatTmp = new THREE.Quaternion();
+    const contextInvQuatTmp = new THREE.Quaternion();
     const contextModeState = {
         enabled: false,
         globe1Visible: true,
@@ -87,6 +92,39 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function mapFromContext(position, targetRoot) {
         return mapCenterToGlobe(contextObject3D, targetRoot, position);
+    }
+
+    function getContextTransformNoScale() {
+        if (!contextObject3D) return null;
+        contextObject3D.updateMatrixWorld(true);
+        contextObject3D.getWorldPosition(contextPosTmp);
+        contextObject3D.getWorldQuaternion(contextQuatTmp);
+        contextInvQuatTmp.copy(contextQuatTmp).invert();
+        return { pos: contextPosTmp, quat: contextQuatTmp, invQuat: contextInvQuatTmp };
+    }
+
+    function worldToContextNoScale(world) {
+        const t = getContextTransformNoScale();
+        if (!t || !world) return world?.clone?.() ?? new THREE.Vector3();
+        return world.clone().sub(t.pos).applyQuaternion(t.invQuat);
+    }
+
+    function intersectContextEllipsoid(ray) {
+        if (!ray || !contextObject3D) return null;
+        const t = getContextTransformNoScale();
+        if (!t) return null;
+        contextObject3D.getWorldScale(contextScaleTmp);
+        const scale = (contextScaleTmp.x + contextScaleTmp.y + contextScaleTmp.z) / 3;
+        if (!Number.isFinite(scale) || scale <= 0) return null;
+
+        const originLocal = ray.origin.clone().sub(t.pos).applyQuaternion(t.invQuat);
+        const dirLocal = ray.direction.clone().applyQuaternion(t.invQuat);
+        const localRay = new THREE.Ray(originLocal, dirLocal);
+
+        pickEllipsoid.setSize(contextScaleTmp.copy(baseEllipsoidSize).multiplyScalar(scale));
+        const hitLocal = pickEllipsoid.intersection(localRay);
+        if (!hitLocal) return null;
+        return hitLocal.applyQuaternion(t.quat).add(t.pos);
     }
 
     function updateAxisForCenter(center, globeRoot, uniforms, mesh) {
@@ -232,8 +270,8 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function computeBearingInContext(p1World, p2World) {
         if (!p1World || !p2World) return 0;
-        const p1Local = contextObject3D.worldToLocal(p1World.clone());
-        const p2Local = contextObject3D.worldToLocal(p2World.clone());
+        const p1Local = worldToContextNoScale(p1World);
+        const p2Local = worldToContextNoScale(p2World);
         const up = p1Local.clone().normalize();
         if (up.lengthSq() < 1e-8) return 0;
         const zAxis = new THREE.Vector3(0, 0, 1);
@@ -409,7 +447,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         }
         view.viewToNormalizedCoords(coords, pickNdc);
         pickRaycaster.setFromCamera(pickNdc, view.camera3D);
-        const hit = pickEllipsoid.intersection(pickRaycaster.ray);
+        const hit = intersectContextEllipsoid(pickRaycaster.ray);
         return hit || undefined;
     }
 
