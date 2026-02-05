@@ -2,7 +2,7 @@ import * as itowns from 'itowns';
 import * as THREE from 'three';
 import { createStencilUniforms, makeGhostCylinder, makeStencilCylinder } from './cylinders.js';
 import { patchMeshesUnderRoot, logMaterialsForRoot } from './patching.js';
-import { createStencilWidget, radiusFromSlider01 } from './ui.js';
+import { createStencilWidget, radiusFromSlider01, UI_BUTTON_STYLE } from './ui.js';
 import { rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
 import { attachContextControls, attachScaleControls } from './stencil-ui-extensions.js';
 
@@ -63,6 +63,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     const contextModePrev = { active: false, owner: null };
     const counterRotationState = { angleRad: 0 };
     const globeScaleState = { value: 1 };
+    const verticalAlignState = { auto: false, method: 'radial' };
     const axisTmp = new THREE.Vector3();
     const upAxis = new THREE.Vector3(0, 1, 0);
     const axisQuat = new THREE.Quaternion();
@@ -103,7 +104,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function setStencilCenter(stencil, globeRoot, layer, position) {
         stencil.cylinder.setCenterECEF(position);
-        alignGlobeToTerrain(globeRoot, layer, position);
+        if (verticalAlignState.auto) {
+            alignGlobeToTerrain(globeRoot, layer, position);
+        }
         updateAxisForCenter(stencil.uniforms.uStencilCenter.value, globeRoot, stencil.uniforms, stencil.cylinder.mesh);
     }
 
@@ -112,17 +115,23 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         updateAxisForCenter(position, globeRoot, null, ghost.mesh);
     }
 
-    function alignGlobeToTerrain(globeRoot, layer, centerWorld) {
-        if (!globeRoot || !layer || !centerWorld) return;
+    function getTerrainWorldAt(globeRoot, layer, centerWorld) {
+        if (!globeRoot || !layer || !centerWorld) return null;
         const local = globeRoot.worldToLocal(centerWorld.clone());
-        if (!Number.isFinite(local.x) || !Number.isFinite(local.y) || !Number.isFinite(local.z)) return;
+        if (!Number.isFinite(local.x) || !Number.isFinite(local.y) || !Number.isFinite(local.z)) return null;
         const coord = new itowns.Coordinates(view.referenceCrs, local.x, local.y, local.z);
         const elevation = itowns.DEMUtils.getElevationValueAt(layer, coord, itowns.DEMUtils.FAST_READ_Z);
-        if (!Number.isFinite(elevation)) return;
+        if (!Number.isFinite(elevation)) return null;
         const geo = coord.as('EPSG:4326');
         const terrainCoord = new itowns.Coordinates('EPSG:4326', geo.longitude, geo.latitude, elevation);
         const terrainLocal = terrainCoord.as(view.referenceCrs);
-        const terrainWorld = globeRoot.localToWorld(new THREE.Vector3(terrainLocal.x, terrainLocal.y, terrainLocal.z));
+        return globeRoot.localToWorld(new THREE.Vector3(terrainLocal.x, terrainLocal.y, terrainLocal.z));
+    }
+
+    function alignGlobeToTerrain(globeRoot, layer, centerWorld) {
+        if (!globeRoot || !layer || !centerWorld) return;
+        const terrainWorld = getTerrainWorldAt(globeRoot, layer, centerWorld);
+        if (!terrainWorld) return;
         const globeCenterWorld = new THREE.Vector3();
         globeRoot.getWorldPosition(globeCenterWorld);
         const axis = centerWorld.clone().sub(globeCenterWorld).normalize();
@@ -130,6 +139,94 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (Math.abs(delta) < 1e-3) return;
         globeRoot.position.add(axis.multiplyScalar(delta));
         globeRoot.updateMatrixWorld(true);
+    }
+
+    function applyVerticalAlignment(method = verticalAlignState.method) {
+        const stencils = [
+            { stencil: stencil1, root: originObject3D, layer: originLayer },
+            { stencil: stencil2, root: destinationObject3D, layer: destinationLayer },
+            { stencil: stencil3, root: contextObject3D, layer: contextLayer },
+        ];
+
+        stencils.forEach(({ stencil, root, layer }) => {
+            if (!stencil?.uniforms?.uStencilCenter?.value || !root) return;
+            const centerWorld = stencil.uniforms.uStencilCenter.value;
+            const terrainWorld = getTerrainWorldAt(root, layer, centerWorld);
+            if (!terrainWorld) return;
+
+            const delta = centerWorld.clone().sub(terrainWorld);
+            let move = new THREE.Vector3();
+            if (method === 'direct') {
+                move.copy(delta);
+            } else if (method === 'world-up') {
+                move.copy(upAxis).multiplyScalar(delta.dot(upAxis));
+            } else {
+                const globeCenterWorld = new THREE.Vector3();
+                root.getWorldPosition(globeCenterWorld);
+                const axis = centerWorld.clone().sub(globeCenterWorld);
+                if (axis.lengthSq() < 1e-8) axis.copy(upAxis);
+                axis.normalize();
+                move.copy(axis).multiplyScalar(delta.dot(axis));
+            }
+
+            if (move.lengthSq() < 1e-6) return;
+            root.position.add(move);
+            root.updateMatrixWorld(true);
+            updateAxisForCenter(centerWorld, root, stencil.uniforms, stencil.cylinder.mesh);
+        });
+
+        view.notifyChange(true);
+    }
+
+    function getStencilCenterRadius(stencil) {
+        const center = stencil?.uniforms?.uStencilCenter?.value;
+        if (!center) return null;
+        const len = center.length();
+        return Number.isFinite(len) ? len : null;
+    }
+
+    function resolveTargetRadius(target) {
+        if (target === 'context') return getStencilCenterRadius(stencil3);
+        if (target === 'origin') return getStencilCenterRadius(stencil1);
+        if (target === 'destination') return getStencilCenterRadius(stencil2);
+        if (target === 'average') {
+            const values = [
+                getStencilCenterRadius(stencil1),
+                getStencilCenterRadius(stencil2),
+                getStencilCenterRadius(stencil3),
+            ].filter((v) => Number.isFinite(v));
+            if (!values.length) return null;
+            return values.reduce((sum, v) => sum + v, 0) / values.length;
+        }
+        return null;
+    }
+
+    function alignCylindersToRadius(target = 'context', includeContext = false) {
+        const targetRadius = resolveTargetRadius(target);
+        if (!Number.isFinite(targetRadius)) return;
+        const entries = [
+            { stencil: stencil1, root: originObject3D },
+            { stencil: stencil2, root: destinationObject3D },
+        ];
+        if (includeContext) entries.push({ stencil: stencil3, root: contextObject3D });
+
+        entries.forEach(({ stencil, root }) => {
+            const center = stencil?.uniforms?.uStencilCenter?.value;
+            if (!center || !root) return;
+            const len = center.length();
+            if (!Number.isFinite(len) || len < 1e-6) return;
+            const delta = targetRadius - len;
+            if (Math.abs(delta) < 1e-3) return;
+            const offset = center.clone().normalize().multiplyScalar(delta);
+            const nextCenter = center.clone().add(offset);
+            stencil.cylinder.setCenterECEF(nextCenter);
+            root.position.add(offset);
+            root.updateMatrixWorld(true);
+            updateAxisForCenter(stencil.uniforms.uStencilCenter.value, root, stencil.uniforms, stencil.cylinder.mesh);
+        });
+
+        updateContextCylinders();
+        view.notifyChange(true);
     }
 
     function computeBearingInContext(p1World, p2World) {
@@ -236,9 +333,11 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         scaleAroundPoint(originObject3D, stencil1.uniforms.uStencilCenter.value, factor);
         scaleAroundPoint(destinationObject3D, stencil2.uniforms.uStencilCenter.value, factor);
         scaleAroundPoint(contextObject3D, stencil3.uniforms.uStencilCenter.value, factor);
-        alignGlobeToTerrain(originObject3D, originLayer, stencil1.uniforms.uStencilCenter.value);
-        alignGlobeToTerrain(destinationObject3D, destinationLayer, stencil2.uniforms.uStencilCenter.value);
-        alignGlobeToTerrain(contextObject3D, contextLayer, stencil3.uniforms.uStencilCenter.value);
+        if (verticalAlignState.auto) {
+            alignGlobeToTerrain(originObject3D, originLayer, stencil1.uniforms.uStencilCenter.value);
+            alignGlobeToTerrain(destinationObject3D, destinationLayer, stencil2.uniforms.uStencilCenter.value);
+            alignGlobeToTerrain(contextObject3D, contextLayer, stencil3.uniforms.uStencilCenter.value);
+        }
         updateAxisForCenter(stencil1.uniforms.uStencilCenter.value, originObject3D, stencil1.uniforms, stencil1.cylinder.mesh);
         updateAxisForCenter(stencil2.uniforms.uStencilCenter.value, destinationObject3D, stencil2.uniforms, stencil2.cylinder.mesh);
         updateAxisForCenter(stencil3.uniforms.uStencilCenter.value, contextObject3D, stencil3.uniforms, stencil3.cylinder.mesh);
@@ -616,6 +715,62 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         },
     });
     updateContextButton = setContextButtonState;
+
+    const alignRow = document.createElement('div');
+    alignRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center;';
+    const alignSelect = document.createElement('select');
+    alignSelect.style.cssText = 'flex:1; min-width:140px; border-radius:6px; border:1px solid #2e344a; background:rgba(58,61,79,0.45); color:#f4f7ff; padding:6px 8px; font-size:12px;';
+    alignSelect.innerHTML = `
+      <option value="radial">Align: radial axis</option>
+      <option value="world-up">Align: world up</option>
+      <option value="direct">Align: direct</option>
+    `;
+    alignSelect.value = verticalAlignState.method;
+    alignSelect.addEventListener('change', () => {
+        verticalAlignState.method = alignSelect.value;
+    });
+
+    const alignBtn = document.createElement('button');
+    alignBtn.style.cssText = UI_BUTTON_STYLE;
+    alignBtn.textContent = 'Align vertical';
+    alignBtn.addEventListener('click', () => applyVerticalAlignment());
+
+    const autoBtn = document.createElement('button');
+    autoBtn.style.cssText = UI_BUTTON_STYLE;
+    const setAutoText = (enabled) => {
+        autoBtn.classList.toggle('is-active', enabled);
+        autoBtn.textContent = enabled ? 'Auto vertical on' : 'Auto vertical off';
+    };
+    setAutoText(verticalAlignState.auto);
+    autoBtn.addEventListener('click', () => {
+        verticalAlignState.auto = !verticalAlignState.auto;
+        setAutoText(verticalAlignState.auto);
+    });
+
+    alignRow.appendChild(alignSelect);
+    alignRow.appendChild(alignBtn);
+    alignRow.appendChild(autoBtn);
+    stencil3.ui.panel.appendChild(alignRow);
+
+    const cylinderRow = document.createElement('div');
+    cylinderRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center;';
+    const cylinderSelect = document.createElement('select');
+    cylinderSelect.style.cssText = 'flex:1; min-width:160px; border-radius:6px; border:1px solid #2e344a; background:rgba(58,61,79,0.45); color:#f4f7ff; padding:6px 8px; font-size:12px;';
+    cylinderSelect.innerHTML = `
+      <option value="context">Cylinders: match context</option>
+      <option value="average">Cylinders: match average</option>
+      <option value="origin">Cylinders: match origin</option>
+      <option value="destination">Cylinders: match destination</option>
+    `;
+    const cylinderBtn = document.createElement('button');
+    cylinderBtn.style.cssText = UI_BUTTON_STYLE;
+    cylinderBtn.textContent = 'Align cylinders';
+    cylinderBtn.addEventListener('click', () => {
+        alignCylindersToRadius(cylinderSelect.value);
+    });
+    cylinderRow.appendChild(cylinderSelect);
+    cylinderRow.appendChild(cylinderBtn);
+    stencil3.ui.panel.appendChild(cylinderRow);
 
     attachScaleControls({
         panel: stencil3.ui.panel,
