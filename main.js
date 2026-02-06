@@ -62,26 +62,121 @@ function placementFromConfig(config) {
 
 function applyViewControlsFromConfig(view, config) {
     const controls = config?.view?.controls || config?.controls;
-    if (!controls || !view?.controls?.lookAtCoordinate) return;
+    if (!controls || !view?.controls?.lookAtCoordinate) return Promise.resolve(null);
     const coord = coordFromConfig(controls.targetGeo || controls.targetECEF);
-    if (!coord) return;
+    if (!coord) return Promise.resolve(null);
     const range = controls.range ?? DEFAULT_PLACEMENT.range;
     const tilt = controls.tilt ?? DEFAULT_PLACEMENT.tilt;
     const heading = controls.heading ?? DEFAULT_PLACEMENT.heading;
-    view.controls.lookAtCoordinate({ coord, range, tilt, heading }, false);
+    return view.controls.lookAtCoordinate({ coord, range, tilt, heading }, false);
 }
 
-function restoreViewFromConfigWithRetries(view, config) {
-    if (!config) return;
-    applyViewControlsFromConfig(view, config);
-    // GlobeControls may still mutate pose during/just after init; re-apply once
-    // in the next frame to keep startup camera deterministic.
-    requestAnimationFrame(() => {
-        applyViewControlsFromConfig(view, config);
-    });
-    setTimeout(() => {
-        applyViewControlsFromConfig(view, config);
-    }, 0);
+function stopCameraAutoGroundAdjust(view) {
+    try {
+        itowns.CameraUtils?.stop?.(view, view?.camera3D);
+    } catch (e) {
+        // no-op
+    }
+}
+
+function enforceCameraFromConfig(view, config) {
+    const cam = view?.camera3D;
+    const cameraCfg = config?.view?.camera;
+    const controlsCfg = config?.view?.controls || config?.controls;
+    if (!cam || !cameraCfg?.position || !controlsCfg) return;
+
+    const targetCoord = coordFromConfig(controlsCfg.targetECEF || controlsCfg.targetGeo);
+    if (!targetCoord) return;
+    const target = targetCoord.as(view.referenceCrs);
+
+    cam.position.set(cameraCfg.position.x, cameraCfg.position.y, cameraCfg.position.z);
+    cam.lookAt(target.x, target.y, target.z);
+    if (Number.isFinite(cameraCfg.near)) cam.near = cameraCfg.near;
+    if (Number.isFinite(cameraCfg.far)) cam.far = cameraCfg.far;
+    if (Number.isFinite(cameraCfg.fov) && cam.isPerspectiveCamera) cam.fov = cameraCfg.fov;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+    view.notifyChange(cam);
+}
+
+function angleDeltaDeg(a, b) {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return Infinity;
+    let d = a - b;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    return Math.abs(d);
+}
+
+function isViewRestored(view, config) {
+    const controlsCfg = config?.view?.controls || config?.controls;
+    if (!controlsCfg || !view?.controls || !view?.camera3D) return false;
+
+    const range = view.controls.getRange?.();
+    const tilt = view.controls.getTilt?.();
+    const heading = view.controls.getHeading?.();
+    const rangeOk = Number.isFinite(range) && Number.isFinite(controlsCfg.range) && Math.abs(range - controlsCfg.range) < 0.5;
+    const tiltOk = Number.isFinite(tilt) && Number.isFinite(controlsCfg.tilt) && Math.abs(tilt - controlsCfg.tilt) < 0.2;
+    const headingOk = Number.isFinite(heading) && Number.isFinite(controlsCfg.heading) && angleDeltaDeg(heading, controlsCfg.heading) < 0.3;
+
+    const cameraCfg = config?.view?.camera?.position;
+    const cam = view.camera3D.position;
+    const cameraOk = cameraCfg
+        ? (Math.abs(cam.x - cameraCfg.x) < 0.5 && Math.abs(cam.y - cameraCfg.y) < 0.5 && Math.abs(cam.z - cameraCfg.z) < 0.5)
+        : true;
+
+    return rangeOk && tiltOk && headingOk && cameraOk;
+}
+
+function restoreViewFromConfigStabilized(view, config, {
+    durationMs = 12000,
+    intervalMs = 500,
+} = {}) {
+    if (!config || !view) return () => {};
+    const started = performance.now();
+    let stopped = false;
+    let timer = null;
+
+    const cleanup = () => {
+        if (stopped) return;
+        stopped = true;
+        if (timer) clearInterval(timer);
+        for (const [name, handler] of listeners) {
+            window.removeEventListener(name, handler, true);
+        }
+    };
+
+    const attempt = () => {
+        if (stopped) return;
+        applyViewControlsFromConfig(view, config)
+            .finally(() => {
+                stopCameraAutoGroundAdjust(view);
+                enforceCameraFromConfig(view, config);
+            });
+
+        const elapsed = performance.now() - started;
+        if (isViewRestored(view, config) || elapsed >= durationMs) {
+            cleanup();
+        }
+    };
+
+    const stopOnUserInput = () => cleanup();
+    const listeners = [
+        ['wheel', stopOnUserInput],
+        ['pointerdown', stopOnUserInput],
+        ['keydown', stopOnUserInput],
+    ];
+    for (const [name, handler] of listeners) {
+        window.addEventListener(name, handler, { capture: true, passive: true });
+    }
+
+    attempt();
+    requestAnimationFrame(attempt);
+    setTimeout(attempt, 0);
+    setTimeout(attempt, 1000);
+    setTimeout(attempt, 3000);
+    timer = setInterval(attempt, intervalMs);
+
+    return cleanup;
 }
 
 async function bootstrap() {
@@ -119,11 +214,12 @@ async function bootstrap() {
 
     const stencilSystem = setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D });
     if (config) {
-        restoreViewFromConfigWithRetries(view, config);
+        let stopRestore = restoreViewFromConfigStabilized(view, config);
         stencilSystem?.applyConfig?.(config);
 
         const onInitialized = () => {
-            restoreViewFromConfigWithRetries(view, config);
+            stopRestore?.();
+            stopRestore = restoreViewFromConfigStabilized(view, config);
             view.removeEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, onInitialized);
         };
         view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, onInitialized);
