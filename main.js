@@ -71,6 +71,19 @@ function applyViewControlsFromConfig(view, config) {
     view.controls.lookAtCoordinate({ coord, range, tilt, heading }, false);
 }
 
+function restoreViewFromConfigWithRetries(view, config) {
+    if (!config) return;
+    applyViewControlsFromConfig(view, config);
+    // GlobeControls may still mutate pose during/just after init; re-apply once
+    // in the next frame to keep startup camera deterministic.
+    requestAnimationFrame(() => {
+        applyViewControlsFromConfig(view, config);
+    });
+    setTimeout(() => {
+        applyViewControlsFromConfig(view, config);
+    }, 0);
+}
+
 async function bootstrap() {
     const configUrl = resolveConfigUrl();
     const config = await loadAppConfig({ url: configUrl, silent: true });
@@ -106,8 +119,14 @@ async function bootstrap() {
 
     const stencilSystem = setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D });
     if (config) {
-        applyViewControlsFromConfig(view, config);
+        restoreViewFromConfigWithRetries(view, config);
         stencilSystem?.applyConfig?.(config);
+
+        const onInitialized = () => {
+            restoreViewFromConfigWithRetries(view, config);
+            view.removeEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, onInitialized);
+        };
+        view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, onInitialized);
     }
 }
 
