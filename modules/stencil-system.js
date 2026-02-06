@@ -8,9 +8,9 @@ import { attachContextControls, attachScaleControls, attachDumpControls } from '
 
 export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D }) {
     const contextObject3D = contextRoot || view?.tileLayer?.object3d || view?.scene;
-    const originScale = originObject3D?.scale?.x || 1;
-    const destinationScale = destinationObject3D?.scale?.x || 1;
-    const contextScale = contextObject3D?.scale?.x || 1;
+    let originScale = originObject3D?.scale?.x || 1;
+    let destinationScale = destinationObject3D?.scale?.x || 1;
+    let contextScale = contextObject3D?.scale?.x || 1;
     const pickRaycaster = new THREE.Raycaster();
     const pickNdc = new THREE.Vector2();
     const pickEllipsoid = new itowns.Ellipsoid();
@@ -430,12 +430,13 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (contextModeState.enabled) return;
         const solved = computeDesiredCounterRotation();
         if (!solved) return;
-        const desired = solved.desired;
-        const delta = normalizeAngleRad(desired - counterRotationState.angleRad);
-        if (Math.abs(delta) < 1e-6) return;
-        rotateGlobeAroundStencil(originObject3D, stencil1.uniforms.uStencilCenter.value, delta);
-        rotateGlobeAroundStencil(destinationObject3D, stencil2.uniforms.uStencilCenter.value, delta);
-        counterRotationState.angleRad = desired;
+        // Apply the current alignment error directly. This avoids dependence on
+        // persisted internal state and prevents jitter when scale changes.
+        const correction = solved.desired;
+        if (Math.abs(correction) < 1e-6) return;
+        rotateGlobeAroundStencil(originObject3D, stencil1.uniforms.uStencilCenter.value, correction);
+        rotateGlobeAroundStencil(destinationObject3D, stencil2.uniforms.uStencilCenter.value, correction);
+        counterRotationState.angleRad = normalizeAngleRad(counterRotationState.angleRad + correction);
         view.notifyChange(true);
     }
 
@@ -1136,12 +1137,31 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (transforms.destination) applyObject3DTransform(destinationObject3D, transforms.destination);
     }
 
+    function refreshBaseScales({ runtimeSnapshot = false, scale = null } = {}) {
+        const sxOrigin = originObject3D?.scale?.x || 1;
+        const sxDestination = destinationObject3D?.scale?.x || 1;
+        const sxContext = contextObject3D?.scale?.x || 1;
+
+        if (runtimeSnapshot && Number.isFinite(scale) && Math.abs(scale) > 1e-12) {
+            // Runtime snapshots store transforms after the interactive global
+            // scale was applied, so recover the base placement scale first.
+            originScale = sxOrigin / scale;
+            destinationScale = sxDestination / scale;
+            contextScale = sxContext / scale;
+        } else {
+            originScale = sxOrigin;
+            destinationScale = sxDestination;
+            contextScale = sxContext;
+        }
+    }
+
     function applyConfigInternal(config) {
         if (!config) return;
         const stencilsCfg = config.stencils || {};
         const transformsAreRuntimeSnapshot = config?.globes?.runtimeSnapshot === true;
         const transformsCfg = config?.globes?.transforms;
         const hasSnapshotTransforms = !!(transformsCfg?.origin || transformsCfg?.destination || transformsCfg?.context);
+        const scale = config.scale ?? config.view?.scale;
         const hasOriginTarget = !!(stencilsCfg.origin?.centerGeo || stencilsCfg.origin?.centerECEF || stencilsCfg.origin?.targetGeo || stencilsCfg.origin?.targetECEF);
         const hasDestinationTarget = !!(stencilsCfg.destination?.centerGeo || stencilsCfg.destination?.centerECEF || stencilsCfg.destination?.targetGeo || stencilsCfg.destination?.targetECEF);
         const contextIsDerived = (stencilsCfg.context?.deriveCenterFromTargets !== false) && (hasOriginTarget || hasDestinationTarget);
@@ -1149,6 +1169,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         suppressAutoAlignment = true;
         try {
             applyGlobeTransformsConfig(config);
+            refreshBaseScales({
+                runtimeSnapshot: transformsAreRuntimeSnapshot && hasSnapshotTransforms,
+                scale,
+            });
 
             if (hasOriginTarget) {
                 applyStencilConfig(stencil1, originScale, stencilsCfg.origin);
@@ -1163,7 +1187,6 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 applyStencilConfig(stencil3, contextScale, stencilsCfg.context);
             }
 
-            const scale = config.scale ?? config.view?.scale;
             if (Number.isFinite(scale)) {
                 if (transformsAreRuntimeSnapshot && hasSnapshotTransforms) {
                     globeScaleState.value = THREE.MathUtils.clamp(+scale || 1, SCALE_MIN, SCALE_MAX);
@@ -1200,9 +1223,15 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             suppressAutoAlignment = prevSuppress;
         }
 
+        if (!contextModeState.enabled) {
+            // Force a fresh solve after config load. Internal angle state is
+            // not user-facing and can be stale across initialization paths.
+            counterRotationState.angleRad = 0;
+        }
         if (contextIsDerived) {
             updateGreenFromBlueRed();
         } else {
+            if (!contextModeState.enabled) applyCounterRotation();
             updateContextCylinders();
             view.notifyChange(true);
         }
