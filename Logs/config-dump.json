@@ -27,29 +27,29 @@
     "view": {
         "placement": {
             "coord": {
-                "longitude": 2.3514000000000093,
-                "latitude": 48.85750637319817,
-                "altitude": 67.48336217901999,
+                "longitude": 2.3902185624816568,
+                "latitude": 48.846795926656476,
+                "altitude": 47.53057859515057,
                 "crs": "EPSG:4326"
             },
-            "range": 15000.878132293032,
-            "tilt": 19.998782574859106,
-            "heading": 0
+            "range": 3198.0291959240794,
+            "tilt": 78.92118107547506,
+            "heading": 2.401807515462508
         },
         "controls": {
-            "range": 15000.878132293032,
-            "tilt": 19.998782574859106,
-            "heading": 0,
+            "range": 3198.0291959240794,
+            "tilt": 78.92118107547506,
+            "heading": 2.401807515462508,
             "targetECEF": {
-                "x": 4200885.725006215,
-                "y": 172499.82781888667,
-                "z": 4780198.47910598,
+                "x": 4201650.8968865285,
+                "y": 175382.7952854984,
+                "z": 4779399.714622211,
                 "crs": "EPSG:4978"
             },
             "targetGeo": {
-                "longitude": 2.3514000000000093,
-                "latitude": 48.85750637319817,
-                "altitude": 67.48336217901999,
+                "longitude": 2.3902185624816568,
+                "latitude": 48.846795926656476,
+                "altitude": 47.53057859515057,
                 "crs": "EPSG:4326"
             },
             "minDistance": 0.1,
@@ -59,72 +59,62 @@
         },
         "camera": {
             "position": {
-                "x": 4214846.864856775,
-                "y": 173073.11030692034,
-                "z": 4774740.982793388
+                "x": 4204183.902467516,
+                "y": 175462.7508172633,
+                "z": 4781350.324931219
             },
             "near": 50,
-            "far": 30046429.117222704,
+            "far": 6385096.219049793,
             "fov": 29.999999999999996,
-            "aspect": 1.8348909657320873,
+            "aspect": 1.4446700507614214,
             "type": "PerspectiveCamera"
         }
     },
     "globes": {
         "transforms": {}
     },
-    "scale": 1,
+    "scale": 0.4073802778041129,
     "contextMode": {
         "enabled": false
     },
     "stencils": {
         "origin": {
             "centerECEF": {
-                "x": 0,
-                "y": 0,
-                "z": 0
+                "x": 4201761.42629146,
+                "y": 174631.11820353882,
+                "z": 4779159.181350073
             },
             "centerGeo": {
-                "longitude": 0,
-                "latitude": 0,
-                "altitude": 0,
+                "longitude": 2.3799235413437594,
+                "latitude": 48.844836606406055,
+                "altitude": -81.48768403660506,
                 "crs": "EPSG:4326"
             },
-            "radiusMeters": 1496.2905648147896,
+            "radiusMeters": 381.2392252666035,
             "opacity": 0.35,
             "stencilEnabled": 1,
             "cylinderVisible": true
         },
         "destination": {
             "centerECEF": {
-                "x": 0,
-                "y": 0,
-                "z": 0
+                "x": 4201760.451954262,
+                "y": 176001.98787885354,
+                "z": 4779109.749341854
             },
             "centerGeo": {
-                "longitude": 0,
-                "latitude": 0,
-                "altitude": 0,
+                "longitude": 2.3985849711533733,
+                "latitude": 48.84416372838803,
+                "altitude": -81.73684305604547,
                 "crs": "EPSG:4326"
             },
-            "radiusMeters": 1496.2905648147896,
+            "radiusMeters": 381.2392252666035,
             "opacity": 0.35,
             "stencilEnabled": 1,
             "cylinderVisible": true
         },
         "context": {
-            "centerECEF": {
-                "x": 0,
-                "y": 0,
-                "z": 0
-            },
-            "centerGeo": {
-                "longitude": 0,
-                "latitude": 0,
-                "altitude": 0,
-                "crs": "EPSG:4326"
-            },
-            "radiusMeters": 1496.2905648147896,
+            "deriveCenterFromTargets": true,
+            "radiusMeters": 258.9022225071438,
             "opacity": 0.35,
             "stencilEnabled": 1,
             "cylinderVisible": true

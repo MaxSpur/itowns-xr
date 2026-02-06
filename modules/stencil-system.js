@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { createStencilUniforms, makeGhostCylinder, makeStencilCylinder } from './cylinders.js';
 import { patchMeshesUnderRoot, logMaterialsForRoot } from './patching.js';
 import { createStencilWidget, radiusFromSlider01, slider01FromRadius, formatMeters } from './ui.js';
-import { rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
+import { applyObject3DTransform, rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
 import { attachContextControls, attachScaleControls, attachDumpControls } from './stencil-ui-extensions.js';
 
 export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D }) {
@@ -81,6 +81,11 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         cyl2Visible: true,
         stencil3Enabled: true,
     };
+    let isGlobeInitialized = false;
+    let didInitialize = false;
+    let pendingConfig = null;
+    let suppressAutoAlignment = false;
+    let scaleUi = null;
 
     function mapCenterToGlobe(fromRoot, toRoot, position) {
         if (!fromRoot || !toRoot) return position.clone();
@@ -144,7 +149,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     function setStencilCenter(stencil, globeRoot, layer, position) {
         stencil.cylinder.setCenterECEF(position);
         updateAxisForCenter(stencil.uniforms.uStencilCenter.value, globeRoot, stencil.uniforms, stencil.cylinder.mesh);
-        if (verticalAlignState.auto) {
+        if (!suppressAutoAlignment && verticalAlignState.auto) {
             applyVerticalAlignment(verticalAlignState.method);
         }
     }
@@ -382,13 +387,14 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function applyGlobeScale(nextScale) {
         const clamped = THREE.MathUtils.clamp(+nextScale || 1, SCALE_MIN, SCALE_MAX);
+        scaleUi?.setScale?.(clamped);
         const factor = clamped / globeScaleState.value;
         if (Math.abs(factor - 1) < 1e-6) return;
         globeScaleState.value = clamped;
         scaleAroundPoint(originObject3D, stencil1.uniforms.uStencilCenter.value, factor);
         scaleAroundPoint(destinationObject3D, stencil2.uniforms.uStencilCenter.value, factor);
         scaleAroundPoint(contextObject3D, stencil3.uniforms.uStencilCenter.value, factor);
-        if (verticalAlignState.auto) {
+        if (!suppressAutoAlignment && verticalAlignState.auto) {
             applyVerticalAlignment(verticalAlignState.method);
         }
         updateAxisForCenter(stencil1.uniforms.uStencilCenter.value, originObject3D, stencil1.uniforms, stencil1.cylinder.mesh);
@@ -529,10 +535,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         contextObject3D.quaternion.copy(tempQuat);
         contextObject3D.updateMatrixWorld(true);
 
-        if (cylinderAlignState.auto) {
+        if (!suppressAutoAlignment && cylinderAlignState.auto) {
             alignCylindersToRadius(cylinderAlignState.target);
         }
-        if (!contextModeState.enabled) {
+        if (!suppressAutoAlignment && !contextModeState.enabled) {
             applyCounterRotation();
             const q1Aligned = originObject3D ? originObject3D.quaternion : identityQuat;
             tempQuat.copy(q1Aligned).slerp(destinationObject3D.quaternion, 0.5);
@@ -803,7 +809,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     });
     updateContextButton = setContextButtonState;
 
-    const scaleUi = attachScaleControls({
+    scaleUi = attachScaleControls({
         panel: stencil3.ui.panel,
         initialScale: globeScaleState.value,
         sliderFromScale: slider01FromScale,
@@ -889,7 +895,12 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 camera: serializeCamera(),
             },
             globes: {
-                transforms: view?.userData?.globeTransforms ?? null,
+                runtimeSnapshot: true,
+                transforms: {
+                    context: serializeObject3D(contextObject3D),
+                    origin: serializeObject3D(originObject3D),
+                    destination: serializeObject3D(destinationObject3D),
+                },
             },
             scale: globeScaleState.value,
             contextMode: { enabled: contextModeState.enabled },
@@ -911,8 +922,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                     cylinderVisible: stencil2.cylinder?.mesh?.visible ?? null,
                 },
                 context: {
-                    centerECEF: serializeVector3(stencil3.uniforms?.uStencilCenter?.value),
-                    centerGeo: stencilCenterToGeo(stencil3.uniforms?.uStencilCenter?.value),
+                    deriveCenterFromTargets: true,
                     radiusMeters: stencil3.uniforms?.uStencilRadius?.value ?? null,
                     opacity: stencil3.cylinder?.mesh?.material?.opacity ?? null,
                     stencilEnabled: stencil3.uniforms?.uStencilEnabled?.value ?? null,
@@ -1066,7 +1076,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function applyStencilConfig(stencil, baseScale, cfg) {
         if (!cfg || !stencil) return;
-        const center = vectorFromCoord(cfg.centerGeo || cfg.centerECEF || cfg.targetGeo || cfg.targetECEF);
+        const center = vectorFromCoord(cfg.centerECEF || cfg.centerGeo || cfg.targetECEF || cfg.targetGeo);
         if (center) {
             const root = stencil === stencil1 ? originObject3D
                 : stencil === stencil2 ? destinationObject3D
@@ -1118,37 +1128,93 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         }
     }
 
-    function applyConfig(config) {
+    function applyGlobeTransformsConfig(cfg) {
+        const transforms = cfg?.globes?.transforms;
+        if (!transforms) return;
+        if (transforms.context) applyObject3DTransform(contextObject3D, transforms.context);
+        if (transforms.origin) applyObject3DTransform(originObject3D, transforms.origin);
+        if (transforms.destination) applyObject3DTransform(destinationObject3D, transforms.destination);
+    }
+
+    function applyConfigInternal(config) {
         if (!config) return;
         const stencilsCfg = config.stencils || {};
+        const transformsAreRuntimeSnapshot = config?.globes?.runtimeSnapshot === true;
+        const transformsCfg = config?.globes?.transforms;
+        const hasSnapshotTransforms = !!(transformsCfg?.origin || transformsCfg?.destination || transformsCfg?.context);
+        const hasOriginTarget = !!(stencilsCfg.origin?.centerGeo || stencilsCfg.origin?.centerECEF || stencilsCfg.origin?.targetGeo || stencilsCfg.origin?.targetECEF);
+        const hasDestinationTarget = !!(stencilsCfg.destination?.centerGeo || stencilsCfg.destination?.centerECEF || stencilsCfg.destination?.targetGeo || stencilsCfg.destination?.targetECEF);
+        const contextIsDerived = (stencilsCfg.context?.deriveCenterFromTargets !== false) && (hasOriginTarget || hasDestinationTarget);
+        const prevSuppress = suppressAutoAlignment;
+        suppressAutoAlignment = true;
+        try {
+            applyGlobeTransformsConfig(config);
 
-        if (stencilsCfg.origin?.centerGeo || stencilsCfg.origin?.centerECEF || stencilsCfg.origin?.targetGeo || stencilsCfg.origin?.targetECEF) {
-            applyStencilConfig(stencil1, originScale, stencilsCfg.origin);
-        }
-        if (stencilsCfg.destination?.centerGeo || stencilsCfg.destination?.centerECEF || stencilsCfg.destination?.targetGeo || stencilsCfg.destination?.targetECEF) {
-            applyStencilConfig(stencil2, destinationScale, stencilsCfg.destination);
+            if (hasOriginTarget) {
+                applyStencilConfig(stencil1, originScale, stencilsCfg.origin);
+            }
+            if (hasDestinationTarget) {
+                applyStencilConfig(stencil2, destinationScale, stencilsCfg.destination);
+            }
+
+            if (contextIsDerived) {
+                updateGreenFromBlueRed();
+            } else if (stencilsCfg.context) {
+                applyStencilConfig(stencil3, contextScale, stencilsCfg.context);
+            }
+
+            const scale = config.scale ?? config.view?.scale;
+            if (Number.isFinite(scale)) {
+                if (transformsAreRuntimeSnapshot && hasSnapshotTransforms) {
+                    globeScaleState.value = THREE.MathUtils.clamp(+scale || 1, SCALE_MIN, SCALE_MAX);
+                    scaleUi?.setScale?.(globeScaleState.value);
+                    applyAllStencilRadii();
+                } else {
+                    applyGlobeScale(scale);
+                }
+            } else {
+                scaleUi?.setScale?.(globeScaleState.value);
+            }
+
+            if (stencilsCfg.origin) applyStencilConfig(stencil1, originScale, stencilsCfg.origin);
+            if (stencilsCfg.destination) applyStencilConfig(stencil2, destinationScale, stencilsCfg.destination);
+            if (!contextIsDerived && stencilsCfg.context) {
+                applyStencilConfig(stencil3, contextScale, stencilsCfg.context);
+            } else if (contextIsDerived && stencilsCfg.context) {
+                // Keep context center derived from origin+destination targets but still apply visual settings.
+                const { radiusMeters, viewRadiusMeters, cylinderRadiusMeters, opacity, stencilEnabled, cylinderVisible } = stencilsCfg.context;
+                applyStencilConfig(stencil3, contextScale, {
+                    radiusMeters,
+                    viewRadiusMeters,
+                    cylinderRadiusMeters,
+                    opacity,
+                    stencilEnabled,
+                    cylinderVisible,
+                });
+            }
+
+            if (config.contextMode?.enabled !== undefined) {
+                setContextMode(!!config.contextMode.enabled);
+            }
+        } finally {
+            suppressAutoAlignment = prevSuppress;
         }
 
-        if (stencilsCfg.origin || stencilsCfg.destination) {
+        if (contextIsDerived) {
             updateGreenFromBlueRed();
-        } else if (stencilsCfg.context) {
-            applyStencilConfig(stencil3, contextScale, stencilsCfg.context);
+        } else {
+            updateContextCylinders();
+            view.notifyChange(true);
         }
+    }
 
-        const scale = config.scale ?? config.view?.scale;
-        if (Number.isFinite(scale)) {
-            applyGlobeScale(scale);
+    function applyConfig(config) {
+        if (!config) return;
+        if (!isGlobeInitialized) {
+            pendingConfig = config;
+            return;
         }
-
-        if (stencilsCfg.origin) applyStencilConfig(stencil1, originScale, stencilsCfg.origin);
-        if (stencilsCfg.destination) applyStencilConfig(stencil2, destinationScale, stencilsCfg.destination);
-        if (stencilsCfg.context) applyStencilConfig(stencil3, contextScale, stencilsCfg.context);
-
-        if (config.contextMode?.enabled !== undefined) {
-            setContextMode(!!config.contextMode.enabled);
-        }
-
-        updateGreenFromBlueRed();
+        applyConfigInternal(config);
     }
 
     window.__itownsDumpConfig = dumpConfigSnapshot;
@@ -1248,6 +1314,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     // Initialize once globe is ready
     view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, () => {
+        if (didInitialize) return;
+        didInitialize = true;
+        isGlobeInitialized = true;
         initStencilCenters();
         // One-time cylinder alignment so centers share a common height baseline.
         alignCylindersToRadius('context');
@@ -1260,6 +1329,12 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (stencil1.ui.status) stencil1.ui.status.textContent = `Patched tile materials: ${stencil1.state.count}`;
         if (stencil2.ui.status) stencil2.ui.status.textContent = `Patched tile materials: ${stencil2.state.count}`;
         if (stencil3.ui.status) stencil3.ui.status.textContent = `Patched tile materials: ${stencil3.state.count}`;
+
+        if (pendingConfig) {
+            const cfg = pendingConfig;
+            pendingConfig = null;
+            applyConfigInternal(cfg);
+        }
 
         view.notifyChange(true);
     });
