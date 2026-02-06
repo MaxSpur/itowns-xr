@@ -356,26 +356,13 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         updateAllRadiusLabels();
     }
 
-    function projectToScreen(worldPos) {
-        const ndc = worldPos.clone().project(view.camera3D);
-        const width = view.camera?.width || view.mainLoop?.gfxEngine?.width || viewerDiv.clientWidth;
-        const height = view.camera?.height || view.mainLoop?.gfxEngine?.height || viewerDiv.clientHeight;
-        return new THREE.Vector2(
-            (ndc.x + 1) * 0.5 * width,
-            (-ndc.y + 1) * 0.5 * height,
-        );
-    }
-
     function computePositionBearing() {
         const p1 = stencil1.uniforms.uStencilCenter.value;
         const p2 = stencil2.uniforms.uStencilCenter.value;
         if (!p1 || !p2) return 0;
-        const s1 = projectToScreen(p1);
-        const s2 = projectToScreen(p2);
-        const dx = s2.x - s1.x;
-        const dy = s2.y - s1.y;
-        if (dx * dx + dy * dy < 1e-6) return 0;
-        return Math.atan2(dy, dx);
+        // Use world/context bearing instead of screen-space bearing so camera
+        // heading changes do not alter counter-rotation.
+        return computeBearingInContext(p1, p2);
     }
 
     function computeTargetBearing() {
@@ -416,13 +403,29 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         view.notifyChange(true);
     }
 
-    function applyCounterRotation() {
-        if (contextModeState.enabled) return;
+    function normalizeAngleRad(angle) {
+        if (!Number.isFinite(angle)) return angle;
+        let a = angle;
+        while (a > Math.PI) a -= 2 * Math.PI;
+        while (a < -Math.PI) a += 2 * Math.PI;
+        return a;
+    }
+
+    function computeDesiredCounterRotation() {
         const targetBearing = computeTargetBearing();
         const positionBearing = computePositionBearing();
-        if (!Number.isFinite(targetBearing) || !Number.isFinite(positionBearing)) return;
-        const desired = -(targetBearing + positionBearing);
-        const delta = desired - counterRotationState.angleRad;
+        if (!Number.isFinite(targetBearing) || !Number.isFinite(positionBearing)) return null;
+        // Both bearings are in world/context frame (east=0, north=+).
+        const desired = normalizeAngleRad(positionBearing - targetBearing);
+        return { targetBearing, positionBearing, desired };
+    }
+
+    function applyCounterRotation() {
+        if (contextModeState.enabled) return;
+        const solved = computeDesiredCounterRotation();
+        if (!solved) return;
+        const desired = solved.desired;
+        const delta = normalizeAngleRad(desired - counterRotationState.angleRad);
         if (Math.abs(delta) < 1e-6) return;
         rotateGlobeAroundStencil(originObject3D, stencil1.uniforms.uStencilCenter.value, delta);
         rotateGlobeAroundStencil(destinationObject3D, stencil2.uniforms.uStencilCenter.value, delta);
@@ -432,7 +435,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function clearCounterRotation() {
         if (Math.abs(counterRotationState.angleRad) < 1e-6) return;
-        const delta = -counterRotationState.angleRad;
+        const delta = normalizeAngleRad(-counterRotationState.angleRad);
         rotateGlobeAroundStencil(originObject3D, stencil1.uniforms.uStencilCenter.value, delta);
         rotateGlobeAroundStencil(destinationObject3D, stencil2.uniforms.uStencilCenter.value, delta);
         counterRotationState.angleRad = 0;
@@ -952,10 +955,46 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return snapshot;
     }
 
+    let counterDebugTimer = null;
+
+    function getCounterRotationDiagnostics() {
+        const solved = computeDesiredCounterRotation();
+        if (!solved) return null;
+        const { targetBearing, positionBearing, desired } = solved;
+        const delta = normalizeAngleRad(desired - counterRotationState.angleRad);
+        const p1 = stencil1.uniforms.uStencilCenter.value;
+        const p2 = stencil2.uniforms.uStencilCenter.value;
+        const p1Context = (p1 && originObject3D && contextObject3D) ? mapCenterToGlobe(originObject3D, contextObject3D, p1) : null;
+        const p2Context = (p2 && destinationObject3D && contextObject3D) ? mapCenterToGlobe(destinationObject3D, contextObject3D, p2) : null;
+        return {
+            targetBearing,
+            positionBearing,
+            desired,
+            delta,
+            angle: counterRotationState.angleRad,
+            p1,
+            p2,
+            p1Context,
+            p2Context,
+            contextMode: contextModeState.enabled,
+        };
+    }
+
     function dumpCounterRotation() {
-        const targetBearing = computeTargetBearing();
-        const positionBearing = computePositionBearing();
-        const desired = -(targetBearing + positionBearing);
+        const diag = getCounterRotationDiagnostics();
+        if (!diag) return null;
+        const {
+            targetBearing,
+            positionBearing,
+            desired,
+            delta,
+            angle,
+            p1,
+            p2,
+            p1Context,
+            p2Context,
+            contextMode,
+        } = diag;
         const toDeg = (v) => (Number.isFinite(v) ? (v * 180) / Math.PI : v);
         console.log('[itowns-xr] counter-rotation', {
             targetBearingRad: targetBearing,
@@ -964,11 +1003,33 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             positionBearingDeg: toDeg(positionBearing),
             desiredRad: desired,
             desiredDeg: toDeg(desired),
-            currentAngleRad: counterRotationState.angleRad,
-            currentAngleDeg: toDeg(counterRotationState.angleRad),
-            contextMode: contextModeState.enabled,
+            deltaRad: delta,
+            deltaDeg: toDeg(delta),
+            currentAngleRad: angle,
+            currentAngleDeg: toDeg(angle),
+            contextMode,
+            stencil1Center: p1 ? { x: p1.x, y: p1.y, z: p1.z } : null,
+            stencil2Center: p2 ? { x: p2.x, y: p2.y, z: p2.z } : null,
+            stencil1InContext: p1Context ? { x: p1Context.x, y: p1Context.y, z: p1Context.z } : null,
+            stencil2InContext: p2Context ? { x: p2Context.x, y: p2Context.y, z: p2Context.z } : null,
         });
-        return { targetBearing, positionBearing, desired, angle: counterRotationState.angleRad };
+        return { targetBearing, positionBearing, desired, delta, angle };
+    }
+
+    function startCounterRotationWatch(intervalMs = 250) {
+        const ms = Math.max(50, Number(intervalMs) || 250);
+        if (counterDebugTimer) clearInterval(counterDebugTimer);
+        counterDebugTimer = setInterval(() => {
+            dumpCounterRotation();
+        }, ms);
+        console.log('[itowns-xr] counter watch started', { intervalMs: ms });
+    }
+
+    function stopCounterRotationWatch() {
+        if (!counterDebugTimer) return;
+        clearInterval(counterDebugTimer);
+        counterDebugTimer = null;
+        console.log('[itowns-xr] counter watch stopped');
     }
 
     function coordFromConfig(coord) {
@@ -1098,6 +1159,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return snapshot;
     };
     window.__itownsCounterRotationDebug = dumpCounterRotation;
+    window.__itownsCounterRotationSample = getCounterRotationDiagnostics;
+    window.__itownsCounterRotationWatch = startCounterRotationWatch;
+    window.__itownsCounterRotationWatchStop = stopCounterRotationWatch;
     window.__itownsApplyConfig = applyConfig;
     attachDumpControls({
         panel: stencil3.ui.panel,
