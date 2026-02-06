@@ -42,7 +42,7 @@ export function makeStencilCylinder(view, uniforms, {
     function updateFromState() {
         const axis = state.center.lengthSq() > 0 ? state.center.clone().normalize() : new THREE.Vector3(0, 1, 0);
 
-        state.height = Math.max(1, state.radius * 0.5);
+        state.height = Math.max(0.01, state.radius * 0.5);
 
         uniforms.uStencilCenter.value.copy(state.center);
         uniforms.uStencilAxis.value.copy(axis);
