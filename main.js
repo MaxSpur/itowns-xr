@@ -1,4 +1,5 @@
 import * as itowns from 'itowns';
+import * as THREE from 'three';
 import { createSources } from './modules/sources.js';
 import { loadAppConfig, resolveConfigUrl } from './modules/config.js';
 import { setupGlobes } from './modules/globes.js';
@@ -14,6 +15,14 @@ const DEFAULT_PLACEMENT = {
     tilt: 20,
     heading: 0,
 };
+
+const STARTUP_TILT_MIN = 4;
+const STARTUP_TILT_MAX = 89.5;
+
+function sanitizeStartupTilt(tilt) {
+    if (!Number.isFinite(tilt)) return DEFAULT_PLACEMENT.tilt;
+    return Math.min(STARTUP_TILT_MAX, Math.max(STARTUP_TILT_MIN, tilt));
+}
 
 function coordFromConfig(coord) {
     if (!coord) return null;
@@ -40,7 +49,9 @@ function placementFromConfig(config) {
             return {
                 coord,
                 range: placement.range ?? DEFAULT_PLACEMENT.range,
-                tilt: placement.tilt ?? DEFAULT_PLACEMENT.tilt,
+                // GlobeView constructor applies this before our controls patching.
+                // Keep startup tilt inside the default GlobeControls interval.
+                tilt: sanitizeStartupTilt(placement.tilt),
                 heading: placement.heading ?? DEFAULT_PLACEMENT.heading,
             };
         }
@@ -52,23 +63,12 @@ function placementFromConfig(config) {
             return {
                 coord,
                 range: controls.range ?? DEFAULT_PLACEMENT.range,
-                tilt: controls.tilt ?? DEFAULT_PLACEMENT.tilt,
+                tilt: sanitizeStartupTilt(controls.tilt),
                 heading: controls.heading ?? DEFAULT_PLACEMENT.heading,
             };
         }
     }
     return DEFAULT_PLACEMENT;
-}
-
-function applyViewControlsFromConfig(view, config) {
-    const controls = config?.view?.controls || config?.controls;
-    if (!controls || !view?.controls?.lookAtCoordinate) return Promise.resolve(null);
-    const coord = coordFromConfig(controls.targetGeo || controls.targetECEF);
-    if (!coord) return Promise.resolve(null);
-    const range = controls.range ?? DEFAULT_PLACEMENT.range;
-    const tilt = controls.tilt ?? DEFAULT_PLACEMENT.tilt;
-    const heading = controls.heading ?? DEFAULT_PLACEMENT.heading;
-    return view.controls.lookAtCoordinate({ coord, range, tilt, heading }, false);
 }
 
 function stopCameraAutoGroundAdjust(view) {
@@ -79,18 +79,33 @@ function stopCameraAutoGroundAdjust(view) {
     }
 }
 
+function getControlTargetFromConfig(view, config) {
+    const controlsCfg = config?.view?.controls || config?.controls;
+    const targetCoord = coordFromConfig(controlsCfg?.targetECEF || controlsCfg?.targetGeo);
+    if (!targetCoord) return null;
+    const target = targetCoord.as(view.referenceCrs);
+    if (![target.x, target.y, target.z].every(Number.isFinite)) return null;
+    return new THREE.Vector3(target.x, target.y, target.z);
+}
+
 function enforceCameraFromConfig(view, config) {
     const cam = view?.camera3D;
     const cameraCfg = config?.view?.camera;
-    const controlsCfg = config?.view?.controls || config?.controls;
-    if (!cam || !cameraCfg?.position || !controlsCfg) return;
+    if (!cam || !cameraCfg?.position) return;
 
-    const targetCoord = coordFromConfig(controlsCfg.targetECEF || controlsCfg.targetGeo);
-    if (!targetCoord) return;
-    const target = targetCoord.as(view.referenceCrs);
+    const target = getControlTargetFromConfig(view, config);
 
     cam.position.set(cameraCfg.position.x, cameraCfg.position.y, cameraCfg.position.z);
-    cam.lookAt(target.x, target.y, target.z);
+    if (cameraCfg.quaternion && Number.isFinite(cameraCfg.quaternion.x) && Number.isFinite(cameraCfg.quaternion.y)
+        && Number.isFinite(cameraCfg.quaternion.z) && Number.isFinite(cameraCfg.quaternion.w)) {
+        cam.quaternion.set(cameraCfg.quaternion.x, cameraCfg.quaternion.y, cameraCfg.quaternion.z, cameraCfg.quaternion.w);
+    } else if (target) {
+        cam.lookAt(target.x, target.y, target.z);
+    }
+    const targetPos = view?.controls?.getCameraTargetPosition?.();
+    if (targetPos?.copy && target) {
+        targetPos.copy(target);
+    }
     if (Number.isFinite(cameraCfg.near)) cam.near = cameraCfg.near;
     if (Number.isFinite(cameraCfg.far)) cam.far = cameraCfg.far;
     if (Number.isFinite(cameraCfg.fov) && cam.isPerspectiveCamera) cam.fov = cameraCfg.fov;
@@ -99,37 +114,34 @@ function enforceCameraFromConfig(view, config) {
     view.notifyChange(cam);
 }
 
-function angleDeltaDeg(a, b) {
-    if (!Number.isFinite(a) || !Number.isFinite(b)) return Infinity;
-    let d = a - b;
-    while (d > 180) d -= 360;
-    while (d < -180) d += 360;
-    return Math.abs(d);
-}
-
 function isViewRestored(view, config) {
-    const controlsCfg = config?.view?.controls || config?.controls;
-    if (!controlsCfg || !view?.controls || !view?.camera3D) return false;
-
-    const range = view.controls.getRange?.();
-    const tilt = view.controls.getTilt?.();
-    const heading = view.controls.getHeading?.();
-    const rangeOk = Number.isFinite(range) && Number.isFinite(controlsCfg.range) && Math.abs(range - controlsCfg.range) < 0.5;
-    const tiltOk = Number.isFinite(tilt) && Number.isFinite(controlsCfg.tilt) && Math.abs(tilt - controlsCfg.tilt) < 0.2;
-    const headingOk = Number.isFinite(heading) && Number.isFinite(controlsCfg.heading) && angleDeltaDeg(heading, controlsCfg.heading) < 0.3;
-
-    const cameraCfg = config?.view?.camera?.position;
+    if (!view?.camera3D) return false;
+    const cameraCfg = config?.view?.camera;
     const cam = view.camera3D.position;
-    const cameraOk = cameraCfg
-        ? (Math.abs(cam.x - cameraCfg.x) < 0.5 && Math.abs(cam.y - cameraCfg.y) < 0.5 && Math.abs(cam.z - cameraCfg.z) < 0.5)
+    const cameraPosOk = cameraCfg?.position
+        ? (Math.abs(cam.x - cameraCfg.position.x) < 0.5 && Math.abs(cam.y - cameraCfg.position.y) < 0.5 && Math.abs(cam.z - cameraCfg.position.z) < 0.5)
+        : true;
+    const q = view.camera3D.quaternion;
+    const cameraQuatOk = cameraCfg?.quaternion
+        ? (Math.abs(q.x - cameraCfg.quaternion.x) < 1e-4
+            && Math.abs(q.y - cameraCfg.quaternion.y) < 1e-4
+            && Math.abs(q.z - cameraCfg.quaternion.z) < 1e-4
+            && Math.abs(q.w - cameraCfg.quaternion.w) < 1e-4)
+        : true;
+    const targetPos = view?.controls?.getCameraTargetPosition?.();
+    const expectedTarget = getControlTargetFromConfig(view, config);
+    const targetOk = expectedTarget && targetPos
+        ? (Math.abs(targetPos.x - expectedTarget.x) < 0.5
+            && Math.abs(targetPos.y - expectedTarget.y) < 0.5
+            && Math.abs(targetPos.z - expectedTarget.z) < 0.5)
         : true;
 
-    return rangeOk && tiltOk && headingOk && cameraOk;
+    return cameraPosOk && cameraQuatOk && targetOk;
 }
 
 function restoreViewFromConfigStabilized(view, config, {
-    durationMs = 12000,
-    intervalMs = 500,
+    durationMs = 20000,
+    intervalMs = 300,
 } = {}) {
     if (!config || !view) return () => {};
     const started = performance.now();
@@ -147,11 +159,8 @@ function restoreViewFromConfigStabilized(view, config, {
 
     const attempt = () => {
         if (stopped) return;
-        applyViewControlsFromConfig(view, config)
-            .finally(() => {
-                stopCameraAutoGroundAdjust(view);
-                enforceCameraFromConfig(view, config);
-            });
+        stopCameraAutoGroundAdjust(view);
+        enforceCameraFromConfig(view, config);
 
         const elapsed = performance.now() - started;
         if (isViewRestored(view, config) || elapsed >= durationMs) {
@@ -173,7 +182,6 @@ function restoreViewFromConfigStabilized(view, config, {
     requestAnimationFrame(attempt);
     setTimeout(attempt, 0);
     setTimeout(attempt, 1000);
-    setTimeout(attempt, 3000);
     timer = setInterval(attempt, intervalMs);
 
     return cleanup;

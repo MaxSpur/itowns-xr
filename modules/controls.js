@@ -23,6 +23,9 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
     controls.dampingMoveFactor = 0.12;
     controls.minDistance = 0.1;
     controls.handleCollision = false;
+    // Support very steep tabletop camera pitches from saved snapshots.
+    // Default iTowns maxPolarAngle (~86deg) clamps negative tilt values.
+    controls.maxPolarAngle = THREE.MathUtils.degToRad(179.99);
     if (controls.states?.setFromOptions) {
         controls.states.setFromOptions({
             ZOOM: { enable: false },
@@ -67,8 +70,20 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         const heading = params.heading !== undefined
             ? params.heading
             : (Number.isFinite(orientationLock.heading) ? orientationLock.heading : controls.getHeading?.());
-        return originalLookAt({ ...params, tilt, heading }, isAnimated);
+        const result = originalLookAt({ ...params, tilt, heading }, isAnimated);
+        // iTowns keeps a "place target on ground" updater alive after lookAt,
+        // which can drift camera pose while DEM tiles stream in.
+        // Stop it once the transform is applied to keep startup deterministic.
+        if (result?.finally) {
+            return result.finally(() => {
+                itowns.CameraUtils?.stop?.(view, cam);
+            });
+        }
+        itowns.CameraUtils?.stop?.(view, cam);
+        return result;
     };
+    // Cancel any updater created during GlobeControls construction.
+    itowns.CameraUtils?.stop?.(view, cam);
 
     const updateCameraClipping = () => {
         const camLocal = view?.camera3D;

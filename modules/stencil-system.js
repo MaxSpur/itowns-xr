@@ -847,6 +847,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (!cam) return null;
         return {
             position: serializeVector3(cam.position),
+            quaternion: serializeQuaternion(cam.quaternion),
             near: cam.near,
             far: cam.far,
             fov: cam.fov,

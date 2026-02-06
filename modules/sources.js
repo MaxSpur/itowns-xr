@@ -18,9 +18,23 @@ const DEFAULT_ELEVATION = {
     zoom: { min: 0, max: 18 },
 };
 
+function normalizeElevationOptions(options) {
+    const out = {
+        ...options,
+        zoom: { ...(options?.zoom || {}) },
+    };
+    // GeoPF SRTM3 on WGS84G does not serve level 0 consistently and produces
+    // noisy 404 bursts. Clamp to level 1+ while preserving user higher minima.
+    if (out.tileMatrixSet === 'WGS84G' && /SRTM3/i.test(out.name || '')) {
+        const min = Number.isFinite(out.zoom.min) ? out.zoom.min : 0;
+        out.zoom.min = Math.max(1, min);
+    }
+    return out;
+}
+
 export function createSources(sourceConfig = {}) {
     const orthoOptions = { ...DEFAULT_ORTHO, ...(sourceConfig?.ortho || {}) };
-    const elevationOptions = { ...DEFAULT_ELEVATION, ...(sourceConfig?.elevation || {}) };
+    const elevationOptions = normalizeElevationOptions({ ...DEFAULT_ELEVATION, ...(sourceConfig?.elevation || {}) });
 
     const orthoSource = new itowns.WMTSSource(orthoOptions);
     const elevationSource = new itowns.WMTSSource(elevationOptions);
