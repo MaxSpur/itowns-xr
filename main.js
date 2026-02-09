@@ -142,15 +142,26 @@ function isViewRestored(view, config) {
 function restoreViewFromConfigStabilized(view, config, {
     durationMs = 20000,
     intervalMs = 300,
+    onAbort = null,
 } = {}) {
-    if (!config || !view) return () => {};
+    if (!config || !view) {
+        return {
+            stop: () => {},
+            wasAborted: () => false,
+        };
+    }
     const started = performance.now();
     let stopped = false;
     let timer = null;
+    let abortedByUser = false;
 
-    const cleanup = () => {
+    const cleanup = (reason = 'done') => {
         if (stopped) return;
         stopped = true;
+        if (reason === 'user') {
+            abortedByUser = true;
+            onAbort?.(reason);
+        }
         if (timer) clearInterval(timer);
         for (const [name, handler] of listeners) {
             window.removeEventListener(name, handler, true);
@@ -164,11 +175,11 @@ function restoreViewFromConfigStabilized(view, config, {
 
         const elapsed = performance.now() - started;
         if (isViewRestored(view, config) || elapsed >= durationMs) {
-            cleanup();
+            cleanup('done');
         }
     };
 
-    const stopOnUserInput = () => cleanup();
+    const stopOnUserInput = () => cleanup('user');
     const listeners = [
         ['wheel', stopOnUserInput],
         ['pointerdown', stopOnUserInput],
@@ -184,7 +195,10 @@ function restoreViewFromConfigStabilized(view, config, {
     setTimeout(attempt, 1000);
     timer = setInterval(attempt, intervalMs);
 
-    return cleanup;
+    return {
+        stop: () => cleanup('stopped'),
+        wasAborted: () => abortedByUser,
+    };
 }
 
 async function bootstrap() {
@@ -222,12 +236,32 @@ async function bootstrap() {
 
     const stencilSystem = setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D });
     if (config) {
-        let stopRestore = restoreViewFromConfigStabilized(view, config);
+        let userInteractedSinceLoad = false;
+        const markUserInteraction = () => { userInteractedSinceLoad = true; };
+        const interactionListeners = [
+            ['wheel', markUserInteraction],
+            ['pointerdown', markUserInteraction],
+            ['keydown', markUserInteraction],
+        ];
+        for (const [name, handler] of interactionListeners) {
+            window.addEventListener(name, handler, { capture: true, passive: true });
+        }
+
+        let restoreCtl = restoreViewFromConfigStabilized(view, config, {
+            onAbort: () => { userInteractedSinceLoad = true; },
+        });
         stencilSystem?.applyConfig?.(config);
 
         const onInitialized = () => {
-            stopRestore?.();
-            stopRestore = restoreViewFromConfigStabilized(view, config);
+            restoreCtl?.stop?.();
+            if (!userInteractedSinceLoad) {
+                restoreCtl = restoreViewFromConfigStabilized(view, config, {
+                    onAbort: () => { userInteractedSinceLoad = true; },
+                });
+            }
+            for (const [name, handler] of interactionListeners) {
+                window.removeEventListener(name, handler, true);
+            }
             view.removeEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, onInitialized);
         };
         view.addEventListener(itowns.GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED, onInitialized);

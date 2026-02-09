@@ -6,6 +6,9 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
 
     const controls = view.controls;
     const cam = view.camera3D;
+    const stopAutoGroundAdjust = () => {
+        itowns.CameraUtils?.stop?.(view, cam);
+    };
     const baseNear = Number.isFinite(cam?.near) ? cam.near : 0.1;
     const baseFar = Number.isFinite(cam?.far) ? cam.far : 1e7;
     const clipConfig = {
@@ -83,7 +86,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         return result;
     };
     // Cancel any updater created during GlobeControls construction.
-    itowns.CameraUtils?.stop?.(view, cam);
+    stopAutoGroundAdjust();
 
     const updateCameraClipping = () => {
         const camLocal = view?.camera3D;
@@ -119,7 +122,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         if (!cam || !target || !Number.isFinite(factor)) return;
 
         controls.player?.stop?.();
-        itowns.CameraUtils?.stop?.(view, cam);
+        stopAutoGroundAdjust();
 
         const currentRange = cam.position.distanceTo(target);
         if (!Number.isFinite(currentRange)) return;
@@ -143,7 +146,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         if (!cam || !target || !Number.isFinite(delta)) return;
 
         controls.player?.stop?.();
-        itowns.CameraUtils?.stop?.(view, cam);
+        stopAutoGroundAdjust();
 
         const zoomFactor = controls.zoomFactor || 1.05;
         // scale with delta magnitude to keep trackpads responsive
@@ -204,6 +207,13 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
     if (controls.addEventListener && itowns?.CONTROL_EVENTS?.CAMERA_TARGET_CHANGED) {
         controls.addEventListener(itowns.CONTROL_EVENTS.CAMERA_TARGET_CHANGED, () => {
             updateCameraClipping();
+        });
+    }
+    if (view.addEventListener && itowns?.VIEW_EVENTS?.CAMERA_MOVED) {
+        // Guard against CameraUtils place-target updaters re-attaching and
+        // mutating camera pose while DEM tiles stream or fail.
+        view.addEventListener(itowns.VIEW_EVENTS.CAMERA_MOVED, () => {
+            stopAutoGroundAdjust();
         });
     }
 
