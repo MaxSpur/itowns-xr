@@ -13,3 +13,4 @@ potree
 .nyc_output/
 **/src/ThreeExtended/
 /old backups
+.DS_Store
