@@ -499,18 +499,30 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return { targetBearing, positionBearing, desired };
     }
 
-    function applyCounterRotation() {
+    function applyCounterRotation({ maxIterations = 1, epsilon = 1e-6 } = {}) {
         if (contextModeState.enabled) return;
-        const solved = computeDesiredCounterRotation();
-        if (!solved) return;
-        // Apply the current alignment error directly. This avoids dependence on
-        // persisted internal state and prevents jitter when scale changes.
-        const correction = solved.desired;
-        if (Math.abs(correction) < 1e-6) return;
-        rotateGlobeAroundStencil(originObject3D, stencil1.uniforms.uStencilCenter.value, correction);
-        rotateGlobeAroundStencil(destinationObject3D, stencil2.uniforms.uStencilCenter.value, correction);
-        counterRotationState.angleRad = normalizeAngleRad(counterRotationState.angleRad + correction);
-        view.notifyChange(true);
+        const iterations = Math.max(1, Math.floor(Number(maxIterations) || 1));
+        let changed = false;
+        for (let i = 0; i < iterations; i++) {
+            const solved = computeDesiredCounterRotation();
+            if (!solved) break;
+            // Apply the current alignment error directly. For some globe
+            // configurations this is slightly non-linear, so allow a small
+            // fixed-point iteration budget when requested.
+            const correction = normalizeAngleRad(solved.desired);
+            if (Math.abs(correction) < epsilon) break;
+            rotateGlobeAroundStencil(originObject3D, stencil1.uniforms.uStencilCenter.value, correction);
+            rotateGlobeAroundStencil(destinationObject3D, stencil2.uniforms.uStencilCenter.value, correction);
+            counterRotationState.angleRad = normalizeAngleRad(counterRotationState.angleRad + correction);
+            const q1Aligned = originObject3D ? originObject3D.quaternion : identityQuat;
+            tempQuat.copy(q1Aligned).slerp(destinationObject3D.quaternion, 0.5);
+            contextObject3D.quaternion.copy(tempQuat);
+            contextObject3D.updateMatrixWorld(true);
+            changed = true;
+        }
+        if (changed) {
+            view.notifyChange(true);
+        }
     }
 
     function clearCounterRotation() {
@@ -1147,6 +1159,18 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return globeRoot.localToWorld(localRef.clone());
     }
 
+    function targetAlignmentErrorRad(globeRoot, desiredCenterWorld, targetGeo) {
+        if (!globeRoot || !desiredCenterWorld || !targetGeo) return Number.POSITIVE_INFINITY;
+        const desiredLocal = globeRoot.worldToLocal(desiredCenterWorld.clone());
+        const targetLocal = vectorFromCoord(targetGeo);
+        if (!targetLocal) return Number.POSITIVE_INFINITY;
+        const a = desiredLocal.normalize();
+        const b = targetLocal.normalize();
+        if (a.lengthSq() < 1e-12 || b.lengthSq() < 1e-12) return Number.POSITIVE_INFINITY;
+        const dot = THREE.MathUtils.clamp(a.dot(b), -1, 1);
+        return Math.acos(dot);
+    }
+
     function nextSavedViewName(name) {
         const trimmed = (typeof name === 'string' ? name.trim() : '');
         if (trimmed) return trimmed;
@@ -1187,25 +1211,39 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             : entryOrId;
         if (!entry) return false;
 
-        const originTarget = geoToWorldForGlobeTarget(entry.originTargetGeo, originObject3D);
-        const destinationTarget = geoToWorldForGlobeTarget(entry.destinationTargetGeo, destinationObject3D);
-        if (!originTarget || !destinationTarget) return false;
-
         const prevSuppress = suppressAutoAlignment;
         suppressAutoAlignment = true;
+        const MAX_PASSES = 4;
+        const TARGET_EPS = 1e-7;
+        const COUNTER_EPS = 1e-7;
         try {
             if (Number.isFinite(entry.scale)) {
                 applyGlobeScale(entry.scale);
             }
-            rotateRootToTargetAtStencil(originObject3D, stencil1.uniforms?.uStencilCenter?.value, originTarget);
-            rotateRootToTargetAtStencil(destinationObject3D, stencil2.uniforms?.uStencilCenter?.value, destinationTarget);
-            // Keep context center/quaternion derived, but skip auto vertical/cylinder alignment.
-            updateGreenFromBlueRed();
-            if (!contextModeState.enabled) {
-                counterRotationState.angleRad = 0;
-                applyCounterRotation();
-                // Re-sync context orientation after counter-rotation changed origin/destination.
+
+            for (let pass = 0; pass < MAX_PASSES; pass++) {
+                const originTarget = geoToWorldForGlobeTarget(entry.originTargetGeo, originObject3D);
+                const destinationTarget = geoToWorldForGlobeTarget(entry.destinationTargetGeo, destinationObject3D);
+                if (!originTarget || !destinationTarget) return false;
+
+                rotateRootToTargetAtStencil(originObject3D, stencil1.uniforms?.uStencilCenter?.value, originTarget);
+                rotateRootToTargetAtStencil(destinationObject3D, stencil2.uniforms?.uStencilCenter?.value, destinationTarget);
+
+                // Keep context center/quaternion derived, but skip auto vertical/cylinder alignment.
                 updateGreenFromBlueRed();
+
+                if (!contextModeState.enabled) {
+                    counterRotationState.angleRad = 0;
+                    applyCounterRotation({ maxIterations: 4, epsilon: 1e-9 });
+                    // Re-sync context orientation after counter-rotation changed origin/destination.
+                    updateGreenFromBlueRed();
+                }
+
+                const originErr = targetAlignmentErrorRad(originObject3D, stencil1.uniforms?.uStencilCenter?.value, entry.originTargetGeo);
+                const destinationErr = targetAlignmentErrorRad(destinationObject3D, stencil2.uniforms?.uStencilCenter?.value, entry.destinationTargetGeo);
+                const solved = contextModeState.enabled ? null : computeDesiredCounterRotation();
+                const counterErr = solved ? Math.abs(normalizeAngleRad(solved.desired)) : 0;
+                if (originErr <= TARGET_EPS && destinationErr <= TARGET_EPS && counterErr <= COUNTER_EPS) break;
             }
         } finally {
             suppressAutoAlignment = prevSuppress;

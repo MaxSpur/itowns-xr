@@ -119,6 +119,9 @@ Last updated: 2026-02-10
   - During "apply saved view", suppress auto vertical/cylinder alignment side effects.
   - Rotate both globes to their saved targets first, then run a single counter-rotation solve.
   - If this order is not respected, repeated apply can drift or require multiple clicks.
+- Convergence detail:
+  - Some configurations need iterative counter-rotation (non-linear residual after one solve).
+  - Saved-view apply now uses a small bounded fixed-point loop so one click converges.
 - Current status:
   - Saved-view save/apply/delete UI with `localStorage` persistence is working.
   - Apply is deterministic across repeated clicks and large target changes.
