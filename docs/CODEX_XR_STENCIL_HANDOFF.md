@@ -84,6 +84,10 @@ Last updated: 2026-02-10
     - `zoom.min >= 1`
     - `zoom.max <= 10`
   - this removed the heavy 404 spam in current setup and improved startup stability.
+- Startup loading warmup:
+  - `main.js` now runs a short post-load camera-based `notifyChange` interval burst.
+  - Triggered after config apply, on globe initialized, and after delayed control priming.
+  - Prevents the "must nudge camera to start tile/elevation loading" behavior.
 
 ## Known Remaining Behavior
 - If user moves camera extremely early during startup, cylinders can still briefly disappear once, then recover quickly.
@@ -121,7 +125,8 @@ Last updated: 2026-02-10
   - If this order is not respected, repeated apply can drift or require multiple clicks.
 - Convergence detail:
   - Some configurations need iterative counter-rotation (non-linear residual after one solve).
-  - Saved-view apply now uses a small bounded fixed-point loop so one click converges.
+  - Saved-view apply now runs a bounded internal solve loop (re-target + counter-rotation + residual check) so one click converges.
+  - Apply now ends with a short camera-based refresh burst so newly visible tiles load without manual camera movement.
 - Current status:
   - Saved-view save/apply/delete UI with `localStorage` persistence is working.
   - Apply is deterministic across repeated clicks and large target changes.

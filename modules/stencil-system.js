@@ -174,6 +174,18 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return world.clone().sub(t.pos).applyQuaternion(t.invQuat);
     }
 
+    function requestCameraRefresh({ frames = 18 } = {}) {
+        const count = Math.max(1, Math.floor(Number(frames) || 1));
+        const source = view.camera3D || view.camera;
+        let left = count;
+        const tick = () => {
+            view.notifyChange(source);
+            left -= 1;
+            if (left > 0) requestAnimationFrame(tick);
+        };
+        tick();
+    }
+
     function intersectContextEllipsoid(ray) {
         if (!ray || !contextObject3D) return null;
         const t = getContextTransformNoScale();
@@ -1248,7 +1260,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         } finally {
             suppressAutoAlignment = prevSuppress;
         }
-        view.notifyChange(true);
+        requestCameraRefresh({ frames: 22 });
         return true;
     }
 

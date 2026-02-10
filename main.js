@@ -225,6 +225,35 @@ function restoreViewFromConfigStabilized(view, config, {
     };
 }
 
+function createStartupWarmup(view, {
+    durationMs = 5000,
+    intervalMs = 120,
+} = {}) {
+    let timer = null;
+    let timeout = null;
+
+    const stop = () => {
+        if (timer) clearInterval(timer);
+        if (timeout) clearTimeout(timeout);
+        timer = null;
+        timeout = null;
+    };
+
+    const start = () => {
+        stop();
+        const tick = () => {
+            if (!view) return;
+            const cameraSource = view.camera3D || view.camera;
+            view.notifyChange(cameraSource);
+        };
+        tick();
+        timer = setInterval(tick, intervalMs);
+        timeout = setTimeout(stop, durationMs);
+    };
+
+    return { start, stop };
+}
+
 async function bootstrap() {
     const configUrl = resolveConfigUrl();
     const config = await loadAppConfig({ url: configUrl, silent: true });
@@ -259,6 +288,7 @@ async function bootstrap() {
     view.userData.globeTransforms = globeTransforms;
 
     const stencilSystem = setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D });
+    const startupWarmup = createStartupWarmup(view);
     if (config) {
         let userInteractedSinceLoad = false;
         const markUserInteraction = () => { userInteractedSinceLoad = true; };
@@ -275,9 +305,11 @@ async function bootstrap() {
             onAbort: () => { userInteractedSinceLoad = true; },
         });
         stencilSystem?.applyConfig?.(config);
+        startupWarmup.start();
 
         const onInitialized = () => {
             restoreCtl?.stop?.();
+            startupWarmup.start();
             if (!userInteractedSinceLoad) {
                 restoreCtl = restoreViewFromConfigStabilized(view, config, {
                     onAbort: () => { userInteractedSinceLoad = true; },
@@ -285,6 +317,7 @@ async function bootstrap() {
                 setTimeout(() => {
                     if (userInteractedSinceLoad) return;
                     primeControlsFromConfig(view, config);
+                    startupWarmup.start();
                 }, 1200);
             }
             for (const [name, handler] of interactionListeners) {
