@@ -120,6 +120,9 @@ Last updated: 2026-02-10
 - Disabled internal GlobeView dynamic near/far:
   - `modules/view-setup.js` now creates `GlobeView` with `dynamicCameraNearFar: false`.
   - Clipping is now fully owned by custom controls logic, removing `GlobeView`'s finite-coordinate conversion path during camera-moved events.
+- Cursor-locked drag behavior:
+  - In `itowns@next`, `enableDamping=true` causes noticeable drag lag/inertia in `MOVE_GLOBE` (map does not stay glued under cursor).
+  - For this app, `modules/controls.js` sets `controls.enableDamping=false` to match precise drag feel from iTowns examples.
 
 ## Known Remaining Behavior
 - If user moves camera extremely early during startup, cylinders can still briefly disappear once, then recover quickly.

@@ -61,8 +61,11 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
     };
 
     controls.zoomFactor = 1.01;
-    controls.enableDamping = true;
-    controls.dampingMoveFactor = 0.12;
+    // Keep drag interaction "cursor-locked" like stock iTowns examples.
+    // Damping introduces lag/inertia that feels like the globe slips
+    // under the cursor during MOVE_GLOBE.
+    controls.enableDamping = false;
+    controls.dampingMoveFactor = 0.0;
     controls.minDistance = 0.1;
     controls.handleCollision = false;
     // Support very steep tabletop camera pitches from saved snapshots.
