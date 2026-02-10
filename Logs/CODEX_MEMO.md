@@ -90,6 +90,10 @@ Last updated: 2026-02-10
 - Small-scale drag offset root cause:
   - `View.getPickingPositionFromDepth` uses a special branch when `logarithmicDepthBuffer` is enabled.
   - That branch is approximate (explicit TODO in iTowns source) and can shift MOVE_GLOBE anchor from cursor at tabletop scales.
+- XR-only missing map tiles while cylinders still visible can be frustum-culling related:
+  - Cylinders already use `mesh.frustumCulled = false`.
+  - Globe tile meshes are attached to transformed/scaled custom globe roots; in XR ArrayCamera this can be culled incorrectly.
+  - Mitigation in this app: force `mesh.frustumCulled = false` for patched tile meshes in `modules/patching.js`.
 
 ## Critical Fixes Applied
 - Camera restore stability:

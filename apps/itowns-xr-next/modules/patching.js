@@ -157,6 +157,10 @@ export function patchMeshesUnderRoot({ root, stencilId, uniforms, state }) {
     traverseMeshes(root, (mesh) => {
         const mat = mesh.material;
         if (!mat || typeof mat.fragmentShader !== 'string' || typeof mat.vertexShader !== 'string') return;
+        // Globe tiles are attached to transformed/scaled custom roots in this app.
+        // In immersive XR (ArrayCamera), frustum tests can incorrectly cull these
+        // meshes even though they're visible in desktop view.
+        mesh.frustumCulled = false;
 
         // If material already patched for another stencil, clone it per-mesh
         const alreadyFor = mat.userData?.__stencilPatchedFor;
