@@ -6,8 +6,47 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
 
     const controls = view.controls;
     const cam = view.camera3D;
+    let pointerInteractionActive = false;
+    const safePose = {
+        position: cam?.position?.clone?.() || null,
+        quaternion: cam?.quaternion?.clone?.() || null,
+        target: controls.getCameraTargetPosition?.()?.clone?.() || null,
+    };
+    const isFiniteVec3 = (v) => !!v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+    const isFiniteQuat = (q) => !!q
+        && Number.isFinite(q.x)
+        && Number.isFinite(q.y)
+        && Number.isFinite(q.z)
+        && Number.isFinite(q.w);
+    const getCurrentTarget = () => controls.getCameraTargetPosition?.();
+    const hasFiniteCameraState = () => isFiniteVec3(view?.camera3D?.position) && isFiniteQuat(view?.camera3D?.quaternion) && isFiniteVec3(getCurrentTarget());
+    const rememberSafePose = () => {
+        if (!hasFiniteCameraState()) return;
+        safePose.position.copy(view.camera3D.position);
+        safePose.quaternion.copy(view.camera3D.quaternion);
+        safePose.target.copy(getCurrentTarget());
+    };
+    const restoreSafePose = () => {
+        if (!safePose.position || !safePose.quaternion || !safePose.target || !view?.camera3D) return false;
+        const camera = view.camera3D;
+        camera.position.copy(safePose.position);
+        camera.quaternion.copy(safePose.quaternion);
+        camera.updateMatrixWorld(true);
+        const target = getCurrentTarget();
+        if (target?.copy) target.copy(safePose.target);
+        controls.player?.stop?.();
+        controls.states?.onPointerUp?.();
+        view.notifyChange(camera);
+        return true;
+    };
+    const isFiniteCoordError = (error) => typeof error?.message === 'string'
+        && error.message.toLowerCase().includes('coordinates must be finite');
     const stopAutoGroundAdjust = () => {
-        itowns.CameraUtils?.stop?.(view, cam);
+        try {
+            itowns.CameraUtils?.stop?.(view, cam);
+        } catch (e) {
+            // no-op: iTowns can race add/remove during startup.
+        }
     };
     const baseNear = Number.isFinite(cam?.near) ? cam.near : 0.1;
     const baseFar = Number.isFinite(cam?.far) ? cam.far : 1e7;
@@ -79,6 +118,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         const finalize = () => {
             lookAtInProgress = Math.max(0, lookAtInProgress - 1);
             stopAutoGroundAdjust();
+            rememberSafePose();
         };
         // iTowns keeps a "place target on ground" updater alive after lookAt,
         // which can drift camera pose while DEM tiles stream in.
@@ -92,12 +132,36 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
     // Cancel any updater created during GlobeControls construction.
     stopAutoGroundAdjust();
 
-    const updateCameraClipping = () => {
+    const originalUpdate = controls.update?.bind(controls);
+    if (originalUpdate) {
+        controls.update = (...args) => {
+            try {
+                const result = originalUpdate(...args);
+                if (!hasFiniteCameraState()) {
+                    restoreSafePose();
+                    return result;
+                }
+                rememberSafePose();
+                return result;
+            } catch (error) {
+                if (isFiniteCoordError(error)) {
+                    restoreSafePose();
+                    return undefined;
+                }
+                throw error;
+            }
+        };
+    }
+
+    const updateCameraClipping = ({ force = false } = {}) => {
+        if (pointerInteractionActive && !force) return;
         const camLocal = view?.camera3D;
         const target = controls.getCameraTargetPosition?.();
         if (!camLocal || !target) return;
         const range = camLocal.position.distanceTo(target);
-        if (!Number.isFinite(range) || range <= 0) return;
+        // iTowns next can briefly report a near-zero range while drag starts,
+        // which would collapse far plane and clip the whole scene.
+        if (!Number.isFinite(range) || range <= 0.01) return;
 
         let desiredNear = Math.max(clipConfig.minNear, range * clipConfig.nearRatio);
         desiredNear = Math.min(desiredNear, range * clipConfig.nearMaxRatio, clipConfig.maxNear);
@@ -140,7 +204,8 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         dir.normalize();
         cam.position.copy(target).add(dir.multiplyScalar(nextRange));
         cam.updateMatrixWorld(true);
-        updateCameraClipping();
+        updateCameraClipping({ force: true });
+        rememberSafePose();
         view.notifyChange(cam);
     };
 
@@ -168,7 +233,8 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         dir.normalize();
         cam.position.copy(target).add(dir.multiplyScalar(nextRange));
         cam.updateMatrixWorld(true);
-        updateCameraClipping();
+        updateCameraClipping({ force: true });
+        rememberSafePose();
         view.notifyChange(cam);
     };
 
@@ -196,6 +262,17 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         if (!viewCoords) return;
         zoomNoTilt(event.deltaY);
     }, { passive: false });
+    const endPointerInteraction = () => {
+        if (!pointerInteractionActive) return;
+        pointerInteractionActive = false;
+        updateCameraClipping({ force: true });
+    };
+    zoomSurface.addEventListener('pointerdown', () => {
+        pointerInteractionActive = true;
+    }, { passive: true });
+    window.addEventListener('pointerup', endPointerInteraction, { passive: true });
+    window.addEventListener('pointercancel', endPointerInteraction, { passive: true });
+    window.addEventListener('blur', endPointerInteraction, { passive: true });
 
     if (controls.addEventListener && itowns?.CONTROL_EVENTS?.ORIENTATION_CHANGED) {
         controls.addEventListener(itowns.CONTROL_EVENTS.ORIENTATION_CHANGED, (event) => {
@@ -206,19 +283,18 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
     if (controls.addEventListener && itowns?.CONTROL_EVENTS?.RANGE_CHANGED) {
         controls.addEventListener(itowns.CONTROL_EVENTS.RANGE_CHANGED, () => {
             updateCameraClipping();
+            rememberSafePose();
         });
     }
     if (controls.addEventListener && itowns?.CONTROL_EVENTS?.CAMERA_TARGET_CHANGED) {
         controls.addEventListener(itowns.CONTROL_EVENTS.CAMERA_TARGET_CHANGED, () => {
             updateCameraClipping();
+            rememberSafePose();
         });
     }
     if (view.addEventListener && itowns?.VIEW_EVENTS?.CAMERA_MOVED) {
-        // Guard against CameraUtils place-target updaters re-attaching and
-        // mutating camera pose while DEM tiles stream or fail.
         view.addEventListener(itowns.VIEW_EVENTS.CAMERA_MOVED, () => {
-            if (lookAtInProgress > 0) return;
-            stopAutoGroundAdjust();
+            rememberSafePose();
         });
     }
 
@@ -246,7 +322,8 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         zoomByFactor(0.6);
     });
 
-    updateCameraClipping();
+    updateCameraClipping({ force: true });
+    rememberSafePose();
 }
 
 function setupZoomDebugLogging({ view, controls, zoomSurface }) {

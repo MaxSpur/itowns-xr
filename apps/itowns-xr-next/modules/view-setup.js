@@ -4,6 +4,7 @@ import { disableAtmosphereEffects } from './view-effects.js';
 
 export function createMainView(viewerDiv, placement) {
     const view = new itowns.GlobeView(viewerDiv, placement, {
+        dynamicCameraNearFar: false,
         renderer: {
             alpha: true,
             antialias: true,

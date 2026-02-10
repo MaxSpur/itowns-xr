@@ -77,6 +77,16 @@ Last updated: 2026-02-10
   - delayed restore pass could re-apply camera/target after user started navigating.
 - DEM 404 bursts (elevation WMTS) amplified instability by continuously exercising place-target-on-ground logic.
 - Steep negative tilts in saved configs can conflict with default GlobeControls startup tilt clamp path if applied too early through the standard placement path.
+- After migration to `itowns@next`, drag start (`pointerdown`) can transiently report a near-zero control range/target.
+  - Our adaptive clipping logic in `modules/controls.js` used that transient range to recompute `camera.far`.
+  - Result: far plane briefly collapsed and all stencils/globes disappeared while mouse drag was active.
+- In `itowns@next`, GlobeControls drag path can occasionally push camera/target into non-finite values.
+  - Stack signature: `GlobeControls.handleDrag -> update -> GlobeView CAMERA_MOVED listener` then
+    `TypeError: coordinates must be finite numbers` from `Coordinates.as(...)`.
+  - Once this happens repeatedly, the scene can vanish until controls state is reset.
+- `GlobeView` default `dynamicCameraNearFar` listener is a secondary trigger:
+  - On every `CAMERA_MOVED`, it converts camera ECEF position to layer CRS.
+  - If camera position is transiently non-finite, this throws from `checkCoord` and can cascade errors.
 
 ## Critical Fixes Applied
 - Camera restore stability:
@@ -99,6 +109,17 @@ Last updated: 2026-02-10
   - `main.js` now runs a short post-load camera-based `notifyChange` interval burst.
   - Triggered after config apply, on globe initialized, and after delayed control priming.
   - Prevents the "must nudge camera to start tile/elevation loading" behavior.
+- Post-`itowns@next` drag stability:
+  - `modules/controls.js` now freezes adaptive clip recomputation during active pointer interaction and reapplies clipping on pointer release.
+  - Clipping updates ignore invalid/tiny transient ranges (`<= 0.01`) that occur during drag initialization.
+  - Removed per-`CAMERA_MOVED` `CameraUtils.stop` loop; this path could race with iTowns internal requester registration and amplify instability.
+- Non-finite camera-state recovery:
+  - `modules/controls.js` tracks a last known-good camera pose (`position`, `quaternion`, controls target).
+  - Wrapped `controls.update(...)` to catch finite-coordinate failures and restore the last known-good pose.
+  - Also restores if update returns with non-finite camera/target values, then forces controls out of active drag state (`states.onPointerUp()`).
+- Disabled internal GlobeView dynamic near/far:
+  - `modules/view-setup.js` now creates `GlobeView` with `dynamicCameraNearFar: false`.
+  - Clipping is now fully owned by custom controls logic, removing `GlobeView`'s finite-coordinate conversion path during camera-moved events.
 
 ## Known Remaining Behavior
 - If user moves camera extremely early during startup, cylinders can still briefly disappear once, then recover quickly.
@@ -111,6 +132,8 @@ Last updated: 2026-02-10
 - Keep restore logic idempotent and tolerant of async layer readiness.
 - Prefer explicit camera+target enforcement and convergence checks over one-shot `lookAtCoordinate` restore.
 - Any new startup hook that calls `lookAtCoordinate` should consider CameraUtils updater races.
+- Treat control-event range values as potentially transient/invalid during interaction start in `itowns@next`; do not drive clipping directly from unguarded range events while pointer is down.
+- Treat `CAMERA_MOVED`/drag updates as potentially non-finite under `itowns@next`; keep a recoverable last-good camera/target snapshot in custom controls code.
 
 ## How Config Should Be Interpreted
 - User intent fields:
