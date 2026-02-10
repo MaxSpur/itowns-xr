@@ -4,7 +4,7 @@ import { createStencilUniforms, makeGhostCylinder, makeStencilCylinder } from '.
 import { patchMeshesUnderRoot, logMaterialsForRoot } from './patching.js';
 import { createStencilWidget, radiusFromSlider01, slider01FromRadius, formatMeters } from './ui.js';
 import { applyObject3DTransform, rotateAroundPoint, scaleAroundPoint } from './object3d-utils.js';
-import { attachContextControls, attachScaleControls, attachDumpControls } from './stencil-ui-extensions.js';
+import { attachContextControls, attachScaleControls, attachDumpControls, attachSavedViewsControls } from './stencil-ui-extensions.js';
 
 export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D }) {
     const contextObject3D = contextRoot || view?.tileLayer?.object3d || view?.scene;
@@ -86,6 +86,66 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     let pendingConfig = null;
     let suppressAutoAlignment = false;
     let scaleUi = null;
+    let savedViewsUi = null;
+    const SAVED_TARGET_VIEWS_KEY = 'itowns.xr.savedTargetViews.v1';
+
+    function isValidGeoPoint(geo) {
+        if (!geo) return false;
+        return Number.isFinite(geo.longitude) && Number.isFinite(geo.latitude);
+    }
+
+    function normalizeSavedViewEntry(raw, idx = 0) {
+        if (!raw || typeof raw !== 'object') return null;
+        const originTargetGeo = raw.originTargetGeo || raw.origin;
+        const destinationTargetGeo = raw.destinationTargetGeo || raw.destination;
+        if (!isValidGeoPoint(originTargetGeo) || !isValidGeoPoint(destinationTargetGeo)) return null;
+        const scale = Number.isFinite(raw.scale) ? raw.scale : 1;
+        return {
+            id: `${raw.id || `sv-${Date.now().toString(36)}-${idx}`}`,
+            name: (typeof raw.name === 'string' && raw.name.trim()) ? raw.name.trim() : `View ${idx + 1}`,
+            createdAt: raw.createdAt || new Date().toISOString(),
+            updatedAt: raw.updatedAt || raw.createdAt || new Date().toISOString(),
+            scale,
+            originTargetGeo: {
+                longitude: originTargetGeo.longitude,
+                latitude: originTargetGeo.latitude,
+                altitude: Number.isFinite(originTargetGeo.altitude) ? originTargetGeo.altitude : 0,
+                crs: originTargetGeo.crs || 'EPSG:4326',
+            },
+            destinationTargetGeo: {
+                longitude: destinationTargetGeo.longitude,
+                latitude: destinationTargetGeo.latitude,
+                altitude: Number.isFinite(destinationTargetGeo.altitude) ? destinationTargetGeo.altitude : 0,
+                crs: destinationTargetGeo.crs || 'EPSG:4326',
+            },
+        };
+    }
+
+    function loadSavedViews() {
+        try {
+            const raw = window.localStorage?.getItem?.(SAVED_TARGET_VIEWS_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.map((entry, idx) => normalizeSavedViewEntry(entry, idx)).filter(Boolean);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    const savedViewsState = { entries: loadSavedViews() };
+
+    function persistSavedViews() {
+        try {
+            window.localStorage?.setItem?.(SAVED_TARGET_VIEWS_KEY, JSON.stringify(savedViewsState.entries));
+        } catch (e) {
+            // no-op
+        }
+    }
+
+    function updateSavedViewsUi() {
+        savedViewsUi?.setItems?.(savedViewsState.entries);
+    }
 
     function mapCenterToGlobe(fromRoot, toRoot, position) {
         if (!fromRoot || !toRoot) return position.clone();
@@ -1068,6 +1128,101 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return new THREE.Vector3(g.x, g.y, g.z);
     }
 
+    function worldToGeoForGlobeTarget(world, globeRoot) {
+        if (!world || !globeRoot) return null;
+        globeRoot.updateMatrixWorld(true);
+        const local = globeRoot.worldToLocal(world.clone());
+        if (![local.x, local.y, local.z].every(Number.isFinite)) return null;
+        const ref = new itowns.Coordinates(view.referenceCrs, local.x, local.y, local.z);
+        const geo = ref.as('EPSG:4326');
+        return {
+            longitude: geo.longitude,
+            latitude: geo.latitude,
+            altitude: Number.isFinite(geo.altitude) ? geo.altitude : 0,
+            crs: 'EPSG:4326',
+        };
+    }
+
+    function geoToWorldForGlobeTarget(geo, globeRoot) {
+        const localRef = vectorFromCoord(geo);
+        if (!localRef || !globeRoot) return null;
+        globeRoot.updateMatrixWorld(true);
+        return globeRoot.localToWorld(localRef.clone());
+    }
+
+    function nextSavedViewName(name) {
+        const trimmed = (typeof name === 'string' ? name.trim() : '');
+        if (trimmed) return trimmed;
+        return `View ${savedViewsState.entries.length + 1}`;
+    }
+
+    function saveCurrentTargetView(name) {
+        if (!isGlobeInitialized) return null;
+        const originCenter = stencil1.uniforms?.uStencilCenter?.value;
+        const destinationCenter = stencil2.uniforms?.uStencilCenter?.value;
+        const originTargetGeo = worldToGeoForGlobeTarget(originCenter, originObject3D);
+        const destinationTargetGeo = worldToGeoForGlobeTarget(destinationCenter, destinationObject3D);
+        if (!isValidGeoPoint(originTargetGeo) || !isValidGeoPoint(destinationTargetGeo)) return null;
+
+        const nowIso = new Date().toISOString();
+        const entry = normalizeSavedViewEntry({
+            id: `sv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+            name: nextSavedViewName(name),
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            scale: globeScaleState.value,
+            originTargetGeo,
+            destinationTargetGeo,
+        }, 0);
+        if (!entry) return null;
+
+        savedViewsState.entries.unshift(entry);
+        persistSavedViews();
+        updateSavedViewsUi();
+        savedViewsUi?.selectById?.(entry.id);
+        return entry;
+    }
+
+    function applySavedTargetView(entryOrId) {
+        if (!isGlobeInitialized) return false;
+        const entry = typeof entryOrId === 'string'
+            ? savedViewsState.entries.find((it) => it.id === entryOrId)
+            : entryOrId;
+        if (!entry) return false;
+
+        const originTarget = geoToWorldForGlobeTarget(entry.originTargetGeo, originObject3D);
+        const destinationTarget = geoToWorldForGlobeTarget(entry.destinationTargetGeo, destinationObject3D);
+        if (!originTarget || !destinationTarget) return false;
+
+        const prevSuppress = suppressAutoAlignment;
+        suppressAutoAlignment = true;
+        try {
+            if (Number.isFinite(entry.scale)) {
+                applyGlobeScale(entry.scale);
+            }
+            rotateGlobe1ToTarget(originTarget);
+            rotateGlobe2ToTarget(destinationTarget);
+        } finally {
+            suppressAutoAlignment = prevSuppress;
+        }
+
+        if (!contextModeState.enabled) {
+            counterRotationState.angleRad = 0;
+        }
+        updateGreenFromBlueRed();
+        view.notifyChange(true);
+        return true;
+    }
+
+    function deleteSavedTargetView(id) {
+        const idx = savedViewsState.entries.findIndex((it) => it.id === id);
+        if (idx < 0) return false;
+        savedViewsState.entries.splice(idx, 1);
+        persistSavedViews();
+        updateSavedViewsUi();
+        return true;
+    }
+
     function setSliderValue(panel, selector, value) {
         const input = panel?.querySelector?.(selector);
         if (!input) return false;
@@ -1259,11 +1414,30 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     window.__itownsCounterRotationWatch = startCounterRotationWatch;
     window.__itownsCounterRotationWatchStop = stopCounterRotationWatch;
     window.__itownsApplyConfig = applyConfig;
+    window.__itownsSavedViewsList = () => savedViewsState.entries.slice();
+    window.__itownsSavedViewsSave = (name = '') => saveCurrentTargetView(name);
+    window.__itownsSavedViewsApply = (id) => applySavedTargetView(id);
+    window.__itownsSavedViewsDelete = (id) => deleteSavedTargetView(id);
     attachDumpControls({
         panel: stencil3.ui.panel,
         onDump: dumpConfigSnapshot,
         anchorSelector: 'input[type="range"]',
     });
+    savedViewsUi = attachSavedViewsControls({
+        panel: stencil3.ui.panel,
+        initialItems: savedViewsState.entries,
+        anchorSelector: null,
+        onSave: (name) => {
+            saveCurrentTargetView(name);
+        },
+        onApply: (id) => {
+            applySavedTargetView(id);
+        },
+        onDelete: (id) => {
+            deleteSavedTargetView(id);
+        },
+    });
+    updateSavedViewsUi();
 
     function getLookAtECEF() {
         const c = view.controls.getLookAtCoordinate();

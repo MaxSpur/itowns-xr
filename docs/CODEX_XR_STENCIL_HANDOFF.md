@@ -30,6 +30,9 @@ Last updated: 2026-02-10
   - radius slider = cylinder physical/view radius control.
   - scale slider = globe content scaling around stencil centers.
 - Counter-rotation is solved in context/world coordinates, not screen-space, so camera heading changes should not break alignment.
+- Saved "target views" must not store globe/cylinder world transforms.
+  - They should only store `originTargetGeo`, `destinationTargetGeo`, and `scale`.
+  - Applying a saved view should behave like two `Pick target` operations plus scale update, while leaving camera and cylinder placement intact.
 
 ## Config Snapshot Contract
 - User-facing snapshot entry point: `window.__itownsDumpConfig()`.
@@ -100,6 +103,18 @@ Last updated: 2026-02-10
 - Derived/runtime fields:
   - counter-rotation angle state, temporary alignment intermediate values, debug-only diagnostics.
 - If context center is derived, context target center in config should not override origin+destination target logic except for explicit opt-out.
+
+## Saved Views Persistence (new)
+- Storage key: `localStorage["itowns.xr.savedTargetViews.v1"]`.
+- Entry shape:
+  - `id`, `name`, `createdAt`, `updatedAt`
+  - `scale`
+  - `originTargetGeo` (`EPSG:4326`)
+  - `destinationTargetGeo` (`EPSG:4326`)
+- Critical conversion detail:
+  - Save path must convert stencil world center -> globe local (`root.worldToLocal`) -> geo.
+  - Apply path must convert geo -> globe local reference CRS -> world (`root.localToWorld`) before rotation.
+  - This is what keeps cylinders fixed in XR/world while changing only map content.
 
 ## High-Value Debug Commands
 - Dump user config: `window.__itownsDumpConfig()`
