@@ -1,0 +1,182 @@
+{
+    "version": 1,
+    "sources": {
+        "ortho": {
+            "url": "https://data.geopf.fr/wmts?",
+            "crs": "EPSG:3857",
+            "name": "ORTHOIMAGERY.ORTHOPHOTOS",
+            "tileMatrixSet": "PM",
+            "format": "image/jpeg",
+            "zoom": {
+                "min": 0,
+                "max": 18
+            }
+        },
+        "elevation": {
+            "url": "https://data.geopf.fr/wmts?",
+            "crs": "EPSG:4326",
+            "name": "ELEVATION.ELEVATIONGRIDCOVERAGE.SRTM3",
+            "tileMatrixSet": "WGS84G",
+            "format": "image/x-bil;bits=32",
+            "zoom": {
+                "min": 0,
+                "max": 18
+            }
+        }
+    },
+    "view": {
+        "placement": {
+            "coord": {
+                "longitude": 4.739224391540641,
+                "latitude": 45.60331020468085,
+                "altitude": 285.18704223602737,
+                "crs": "EPSG:4326"
+            },
+            "range": 1097.2354905204243,
+            "tilt": -7.933633810994821,
+            "heading": -27.15010819531099
+        },
+        "controls": {
+            "range": 1097.2354905204243,
+            "tilt": -7.933633810994821,
+            "heading": -27.15010819531099,
+            "targetECEF": {
+                "x": 4454846.689157326,
+                "y": 369325.62037082366,
+                "z": 4534713.540545697,
+                "crs": "EPSG:4978"
+            },
+            "targetGeo": {
+                "longitude": 4.739224391540641,
+                "latitude": 45.60331020468085,
+                "altitude": 285.18704223602737,
+                "crs": "EPSG:4326"
+            },
+            "minDistance": 0.1,
+            "maxDistance": 51025096,
+            "zoomFactor": 1.01,
+            "enableDamping": true
+        },
+        "camera": {
+            "position": {
+                "x": 4455386.059997671,
+                "y": 369867.9395187033,
+                "z": 4533926.841899398
+            },
+            "near": 33.8630107675824,
+            "far": 3386301.07675824,
+            "fov": 29.999999999999996,
+            "aspect": 1.4446700507614214,
+            "type": "PerspectiveCamera"
+        }
+    },
+    "globes": {
+        "runtimeSnapshot": true,
+        "transforms": {
+            "context": {
+                "position": {
+                    "x": 4175745.8966176184,
+                    "y": 346936.10870335554,
+                    "z": 4250982.022293507
+                },
+                "quaternion": {
+                    "x": 0.6953869612090338,
+                    "y": 0.05729671634728406,
+                    "z": 0.7056887802679142,
+                    "w": 0.12311541690734293
+                },
+                "scale": {
+                    "x": 0.06237348354824193,
+                    "y": 0.06237348354824193,
+                    "z": 0.06237348354824193
+                },
+                "visible": true
+            },
+            "origin": {
+                "position": {
+                    "x": 4176188.7763488228,
+                    "y": 345976.1502933559,
+                    "z": 4250624.966077452
+                },
+                "quaternion": {
+                    "x": 0.6947848785959537,
+                    "y": 0.05831916684763195,
+                    "z": 0.7061976540641852,
+                    "w": 0.1231166952401153
+                },
+                "scale": {
+                    "x": 0.06237348354824193,
+                    "y": 0.06237348354824193,
+                    "z": 0.06237348354824193
+                },
+                "visible": true
+            },
+            "destination": {
+                "position": {
+                    "x": 4175304.3587292423,
+                    "y": 347896.1967252577,
+                    "z": 4251340.472172839
+                },
+                "quaternion": {
+                    "x": 0.6959878847075452,
+                    "y": 0.05627417034117843,
+                    "z": 0.7051787301853568,
+                    "w": 0.1231139333580777
+                },
+                "scale": {
+                    "x": 0.06237348354824193,
+                    "y": 0.06237348354824193,
+                    "z": 0.06237348354824193
+                },
+                "visible": true
+            }
+        }
+    },
+    "scale": 0.062373483548241924,
+    "contextMode": {
+        "enabled": false
+    },
+    "stencils": {
+        "origin": {
+            "centerECEF": {
+                "x": 4454063.564183719,
+                "y": 368996.6886776646,
+                "z": 4533452.522788856
+            },
+            "centerGeo": {
+                "longitude": 4.7358514441220265,
+                "latitude": 45.60056384651085,
+                "altitude": -1180.8455769987777,
+                "crs": "EPSG:4326"
+            },
+            "radiusMeters": 127.35689991864739,
+            "opacity": 0.35,
+            "stencilEnabled": 1,
+            "cylinderVisible": true
+        },
+        "destination": {
+            "centerECEF": {
+                "x": 4453763.784779528,
+                "y": 369633.3629118762,
+                "z": 4533695.169818267
+            },
+            "centerGeo": {
+                "longitude": 4.744303370130118,
+                "latitude": 45.60367421244177,
+                "altitude": -1179.6847515264526,
+                "crs": "EPSG:4326"
+            },
+            "radiusMeters": 150.6084222516732,
+            "opacity": 0.35,
+            "stencilEnabled": 1,
+            "cylinderVisible": true
+        },
+        "context": {
+            "deriveCenterFromTargets": true,
+            "radiusMeters": 135.84159711778986,
+            "opacity": 0.35,
+            "stencilEnabled": 1,
+            "cylinderVisible": true
+        }
+    }
+}
