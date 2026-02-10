@@ -87,6 +87,9 @@ Last updated: 2026-02-10
 - `GlobeView` default `dynamicCameraNearFar` listener is a secondary trigger:
   - On every `CAMERA_MOVED`, it converts camera ECEF position to layer CRS.
   - If camera position is transiently non-finite, this throws from `checkCoord` and can cascade errors.
+- Small-scale drag offset root cause:
+  - `View.getPickingPositionFromDepth` uses a special branch when `logarithmicDepthBuffer` is enabled.
+  - That branch is approximate (explicit TODO in iTowns source) and can shift MOVE_GLOBE anchor from cursor at tabletop scales.
 
 ## Critical Fixes Applied
 - Camera restore stability:
@@ -120,6 +123,9 @@ Last updated: 2026-02-10
 - Disabled internal GlobeView dynamic near/far:
   - `modules/view-setup.js` now creates `GlobeView` with `dynamicCameraNearFar: false`.
   - Clipping is now fully owned by custom controls logic, removing `GlobeView`'s finite-coordinate conversion path during camera-moved events.
+- Disabled renderer log-depth in this app:
+  - `modules/view-setup.js` now sets `renderer.logarithmicDepthBuffer = false`.
+  - This forces the exact depth unprojection path for picking and improves cursor-locked drag at small scales.
 - Cursor-locked drag behavior:
   - In `itowns@next`, `enableDamping=true` causes noticeable drag lag/inertia in `MOVE_GLOBE` (map does not stay glued under cursor).
   - For this app, `modules/controls.js` sets `controls.enableDamping=false` to match precise drag feel from iTowns examples.

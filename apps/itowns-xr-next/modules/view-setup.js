@@ -8,7 +8,10 @@ export function createMainView(viewerDiv, placement) {
         renderer: {
             alpha: true,
             antialias: true,
-            logarithmicDepthBuffer: true,
+            // Keep depth picking precise for MOVE_GLOBE drag anchoring.
+            // iTowns log-depth picking path is approximate and drifts at
+            // tabletop scales.
+            logarithmicDepthBuffer: false,
         },
         webXR: { controllers: true },
     });
