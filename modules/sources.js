@@ -24,10 +24,13 @@ function normalizeElevationOptions(options) {
         zoom: { ...(options?.zoom || {}) },
     };
     // GeoPF SRTM3 on WGS84G does not serve level 0 consistently and produces
-    // noisy 404 bursts. Clamp to level 1+ while preserving user higher minima.
+    // noisy 404 bursts. Also cap max zoom because high matrix levels often
+    // return 404 for this layer on many areas.
     if (out.tileMatrixSet === 'WGS84G' && /SRTM3/i.test(out.name || '')) {
         const min = Number.isFinite(out.zoom.min) ? out.zoom.min : 0;
+        const max = Number.isFinite(out.zoom.max) ? out.zoom.max : 18;
         out.zoom.min = Math.max(1, min);
+        out.zoom.max = Math.min(max, 10);
     }
     return out;
 }

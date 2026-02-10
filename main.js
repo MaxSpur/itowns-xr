@@ -114,6 +114,30 @@ function enforceCameraFromConfig(view, config) {
     view.notifyChange(cam);
 }
 
+async function primeControlsFromConfig(view, config) {
+    const controls = view?.controls;
+    if (!controls?.lookAtCoordinate) return;
+    const controlsCfg = config?.view?.controls || config?.controls;
+    if (!controlsCfg) return;
+    const coord = coordFromConfig(controlsCfg.targetECEF || controlsCfg.targetGeo);
+    if (!coord) return;
+
+    const params = {
+        coord,
+        range: controlsCfg.range ?? DEFAULT_PLACEMENT.range,
+        tilt: controlsCfg.tilt ?? DEFAULT_PLACEMENT.tilt,
+        heading: controlsCfg.heading ?? DEFAULT_PLACEMENT.heading,
+        proxy: false,
+    };
+    try {
+        await controls.lookAtCoordinate(params, false);
+    } catch (e) {
+        // best effort: we enforce exact camera pose right after this call
+    }
+    stopCameraAutoGroundAdjust(view);
+    enforceCameraFromConfig(view, config);
+}
+
 function isViewRestored(view, config) {
     if (!view?.camera3D) return false;
     const cameraCfg = config?.view?.camera;
@@ -251,6 +275,10 @@ async function bootstrap() {
             onAbort: () => { userInteractedSinceLoad = true; },
         });
         stencilSystem?.applyConfig?.(config);
+        setTimeout(() => {
+            if (userInteractedSinceLoad) return;
+            primeControlsFromConfig(view, config);
+        }, 1200);
 
         const onInitialized = () => {
             restoreCtl?.stop?.();
@@ -258,6 +286,10 @@ async function bootstrap() {
                 restoreCtl = restoreViewFromConfigStabilized(view, config, {
                     onAbort: () => { userInteractedSinceLoad = true; },
                 });
+                setTimeout(() => {
+                    if (userInteractedSinceLoad) return;
+                    primeControlsFromConfig(view, config);
+                }, 1200);
             }
             for (const [name, handler] of interactionListeners) {
                 window.removeEventListener(name, handler, true);
