@@ -64,9 +64,11 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         tilt: Number.isFinite(controls.getTilt?.()) ? controls.getTilt() : undefined,
         heading: Number.isFinite(controls.getHeading?.()) ? controls.getHeading() : undefined,
     };
+    let lookAtInProgress = 0;
 
     const originalLookAt = controls.lookAtCoordinate.bind(controls);
     controls.lookAtCoordinate = (params = {}, isAnimated) => {
+        lookAtInProgress += 1;
         const tilt = params.tilt !== undefined
             ? params.tilt
             : (Number.isFinite(orientationLock.tilt) ? orientationLock.tilt : controls.getTilt?.());
@@ -74,15 +76,17 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
             ? params.heading
             : (Number.isFinite(orientationLock.heading) ? orientationLock.heading : controls.getHeading?.());
         const result = originalLookAt({ ...params, tilt, heading }, isAnimated);
+        const finalize = () => {
+            lookAtInProgress = Math.max(0, lookAtInProgress - 1);
+            stopAutoGroundAdjust();
+        };
         // iTowns keeps a "place target on ground" updater alive after lookAt,
         // which can drift camera pose while DEM tiles stream in.
         // Stop it once the transform is applied to keep startup deterministic.
         if (result?.finally) {
-            return result.finally(() => {
-                itowns.CameraUtils?.stop?.(view, cam);
-            });
+            return result.finally(finalize);
         }
-        itowns.CameraUtils?.stop?.(view, cam);
+        finalize();
         return result;
     };
     // Cancel any updater created during GlobeControls construction.
@@ -213,6 +217,7 @@ export function setupCustomZoomControls({ view, viewerDiv }) {
         // Guard against CameraUtils place-target updaters re-attaching and
         // mutating camera pose while DEM tiles stream or fail.
         view.addEventListener(itowns.VIEW_EVENTS.CAMERA_MOVED, () => {
+            if (lookAtInProgress > 0) return;
             stopAutoGroundAdjust();
         });
     }

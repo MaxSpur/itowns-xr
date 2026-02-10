@@ -275,10 +275,6 @@ async function bootstrap() {
             onAbort: () => { userInteractedSinceLoad = true; },
         });
         stencilSystem?.applyConfig?.(config);
-        setTimeout(() => {
-            if (userInteractedSinceLoad) return;
-            primeControlsFromConfig(view, config);
-        }, 1200);
 
         const onInitialized = () => {
             restoreCtl?.stop?.();
