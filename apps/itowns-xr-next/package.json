@@ -8,12 +8,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "itowns": "next",
-    "proj4": "^2.20.2",
-    "three": "^0.182.0"
+    "itowns": "2.46.1-next.28",
+    "proj4": "2.20.2",
+    "three": "0.182.0"
   },
   "devDependencies": {
-    "vite": "^7.2.7"
+    "vite": "7.2.7"
+  },
+  "overrides": {
+    "three": "0.182.0"
   }
 }
-
