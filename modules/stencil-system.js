@@ -445,6 +445,19 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         rotateAroundPoint(globeRoot, center.clone(), axis, angle);
     }
 
+    function rotateRootToTargetAtStencil(globeRoot, desiredCenterWorld, targetWorld) {
+        if (!globeRoot || !desiredCenterWorld || !targetWorld) return false;
+        const center = new THREE.Vector3();
+        globeRoot.getWorldPosition(center);
+        const tDir = targetWorld.clone().sub(center).normalize();
+        const dDir = desiredCenterWorld.clone().sub(center).normalize();
+        if (tDir.lengthSq() < 1e-6 || dDir.lengthSq() < 1e-6) return false;
+        const q = new THREE.Quaternion().setFromUnitVectors(tDir, dDir);
+        globeRoot.quaternion.premultiply(q);
+        globeRoot.updateMatrixWorld(true);
+        return true;
+    }
+
     function applyGlobeScale(nextScale) {
         const clamped = THREE.MathUtils.clamp(+nextScale || 1, SCALE_MIN, SCALE_MAX);
         scaleUi?.setScale?.(clamped);
@@ -642,15 +655,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         }
         const desired = stencil2.uniforms.uStencilCenter.value;
         if (!desired) return;
-        const center = new THREE.Vector3();
-        destinationObject3D.getWorldPosition(center);
-        const tDir = targetECEF.clone().sub(center).normalize();
-        const dDir = desired.clone().sub(center).normalize();
-        if (tDir.lengthSq() < 1e-6 || dDir.lengthSq() < 1e-6) return;
-
-        const q = new THREE.Quaternion().setFromUnitVectors(tDir, dDir);
-        destinationObject3D.quaternion.premultiply(q);
-        destinationObject3D.updateMatrixWorld(true);
+        if (!rotateRootToTargetAtStencil(destinationObject3D, desired, targetECEF)) return;
         view.notifyChange(true);
         updateGreenFromBlueRed();
     }
@@ -661,15 +666,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         }
         const desired = stencil1.uniforms.uStencilCenter.value;
         if (!desired || !originObject3D) return;
-        const center = new THREE.Vector3();
-        originObject3D.getWorldPosition(center);
-        const tDir = targetECEF.clone().sub(center).normalize();
-        const dDir = desired.clone().sub(center).normalize();
-        if (tDir.lengthSq() < 1e-6 || dDir.lengthSq() < 1e-6) return;
-
-        const q = new THREE.Quaternion().setFromUnitVectors(tDir, dDir);
-        originObject3D.quaternion.premultiply(q);
-        originObject3D.updateMatrixWorld(true);
+        if (!rotateRootToTargetAtStencil(originObject3D, desired, targetECEF)) return;
         view.notifyChange(true);
         updateGreenFromBlueRed();
     }
@@ -1200,16 +1197,19 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             if (Number.isFinite(entry.scale)) {
                 applyGlobeScale(entry.scale);
             }
-            rotateGlobe1ToTarget(originTarget);
-            rotateGlobe2ToTarget(destinationTarget);
+            rotateRootToTargetAtStencil(originObject3D, stencil1.uniforms?.uStencilCenter?.value, originTarget);
+            rotateRootToTargetAtStencil(destinationObject3D, stencil2.uniforms?.uStencilCenter?.value, destinationTarget);
+            // Keep context center/quaternion derived, but skip auto vertical/cylinder alignment.
+            updateGreenFromBlueRed();
+            if (!contextModeState.enabled) {
+                counterRotationState.angleRad = 0;
+                applyCounterRotation();
+                // Re-sync context orientation after counter-rotation changed origin/destination.
+                updateGreenFromBlueRed();
+            }
         } finally {
             suppressAutoAlignment = prevSuppress;
         }
-
-        if (!contextModeState.enabled) {
-            counterRotationState.angleRad = 0;
-        }
-        updateGreenFromBlueRed();
         view.notifyChange(true);
         return true;
     }

@@ -115,6 +115,13 @@ Last updated: 2026-02-10
   - Save path must convert stencil world center -> globe local (`root.worldToLocal`) -> geo.
   - Apply path must convert geo -> globe local reference CRS -> world (`root.localToWorld`) before rotation.
   - This is what keeps cylinders fixed in XR/world while changing only map content.
+- Apply sequencing detail:
+  - During "apply saved view", suppress auto vertical/cylinder alignment side effects.
+  - Rotate both globes to their saved targets first, then run a single counter-rotation solve.
+  - If this order is not respected, repeated apply can drift or require multiple clicks.
+- Current status:
+  - Saved-view save/apply/delete UI with `localStorage` persistence is working.
+  - Apply is deterministic across repeated clicks and large target changes.
 
 ## High-Value Debug Commands
 - Dump user config: `window.__itownsDumpConfig()`
