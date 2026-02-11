@@ -94,6 +94,13 @@ Last updated: 2026-02-10
   - Cylinders already use `mesh.frustumCulled = false`.
   - Globe tile meshes are attached to transformed/scaled custom globe roots; in XR ArrayCamera this can be culled incorrectly.
   - Mitigation in this app: force `mesh.frustumCulled = false` for patched tile meshes in `modules/patching.js`.
+- XR session setup compatibility insight:
+  - Official immersive-vr samples use a minimal session (`VRButton`/`requestSession('immersive-vr')`) and do not replace `baseLayer` after session start.
+  - Our previous custom transparent layer path (`session.updateRenderState({ baseLayer: new XRWebGLLayer(...) })`) is a high-risk divergence on real devices.
+  - Current app setup was aligned toward the sample:
+    - `modules/xr-setup.js` now uses `VRButton` (not `XRButton`) with minimal optional features.
+    - explicit `renderer.xr.setReferenceSpaceType('local-floor')`.
+    - `configureTransparentXR()` is no-op by default (no manual baseLayer replacement).
 
 ## Critical Fixes Applied
 - Camera restore stability:
