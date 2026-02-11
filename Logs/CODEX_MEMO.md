@@ -97,9 +97,9 @@ Last updated: 2026-02-10
 - XR session setup compatibility insight:
   - Official immersive-vr samples use a minimal session (`VRButton`/`requestSession('immersive-vr')`) and do not replace `baseLayer` after session start.
   - Our previous custom transparent layer path (`session.updateRenderState({ baseLayer: new XRWebGLLayer(...) })`) is a high-risk divergence on real devices.
-  - Current app setup was aligned toward the sample:
-    - `modules/xr-setup.js` now uses `VRButton` (not `XRButton`) with minimal optional features.
-    - explicit `renderer.xr.setReferenceSpaceType('local-floor')`.
+  - Current app setup keeps the no-custom-`baseLayer` path and now uses three.js `XRButton` auto-mode:
+    - prefers `immersive-ar` when available, otherwise falls back to `immersive-vr`.
+    - explicit `renderer.xr.setReferenceSpaceType('local-floor')` unless overridden in `attachXRButton(..., { referenceSpaceType })`.
     - `configureTransparentXR()` is no-op by default (no manual baseLayer replacement).
 
 ## Critical Fixes Applied
