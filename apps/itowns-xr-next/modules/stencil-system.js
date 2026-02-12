@@ -287,6 +287,19 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return new THREE.Vector3(1, 0, 0);
     }
 
+    function getCurrentSystemPlaneNormal(fallbackUp) {
+        const c1 = stencil1?.uniforms?.uStencilCenter?.value;
+        const c2 = stencil2?.uniforms?.uStencilCenter?.value;
+        const c3 = stencil3?.uniforms?.uStencilCenter?.value;
+        if (c1 && c2 && c3) {
+            const v1 = c2.clone().sub(c1);
+            const v2 = c3.clone().sub(c1);
+            const n = new THREE.Vector3().crossVectors(v1, v2);
+            if (n.lengthSq() > 1e-12) return n.normalize();
+        }
+        return (fallbackUp && fallbackUp.lengthSq() > 1e-12) ? fallbackUp.clone().normalize() : upAxis.clone();
+    }
+
     function applyRigidTransformToObject(object3D, rotation, translation, pivot) {
         if (!object3D) return;
         if (pivot) {
@@ -340,32 +353,51 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const center = getCurrentSystemCenter();
         const systemUp = getCurrentSystemUp(center);
         const systemForward = getCurrentSystemForward();
-        const floorUp = (headPose.floorUp && headPose.floorUp.lengthSq() > 1e-12) ? headPose.floorUp.clone().normalize() : upAxis.clone();
+        const systemPlaneNormal = getCurrentSystemPlaneNormal(systemUp);
+        const floorUp = (headPose.floorUp && headPose.floorUp.lengthSq() > 1e-12)
+            ? headPose.floorUp.clone().normalize()
+            : upAxis.clone();
 
-        const userForward = projectDirectionOnPlane(headPose.forward, floorUp, new THREE.Vector3(0, 0, -1));
-        if (!userForward) return null;
+        const placementForward = projectDirectionOnPlane(
+            headPose.forward,
+            floorUp,
+            projectDirectionOnPlane(systemForward, floorUp, new THREE.Vector3(0, 0, -1)),
+        );
+        if (!placementForward) return null;
+        const placementRight = new THREE.Vector3().crossVectors(placementForward, floorUp).normalize();
+        if (placementRight.lengthSq() < 1e-12) return null;
         const bearingRad = THREE.MathUtils.degToRad(cfg.bearingDeg || 0);
-        const placementDirection = userForward.clone().applyAxisAngle(floorUp, bearingRad).normalize();
+        const desiredAxis = placementRight.clone().applyAxisAngle(floorUp, bearingRad).normalize();
 
-        const qUp = new THREE.Quaternion().setFromUnitVectors(systemUp, floorUp);
-        const forwardAfterUp = projectDirectionOnPlane(systemForward.clone().applyQuaternion(qUp), floorUp, new THREE.Vector3(1, 0, 0));
-        if (!forwardAfterUp) return null;
+        // First flatten the full stencil triangle to the floor plane.
+        const qPlane = new THREE.Quaternion().setFromUnitVectors(systemPlaneNormal, floorUp);
+        // Then yaw inside that plane so origin->destination matches desired tabletop bearing.
+        const axisAfterPlane = projectDirectionOnPlane(systemForward.clone().applyQuaternion(qPlane), floorUp, desiredAxis);
+        if (!axisAfterPlane) return null;
 
-        const deltaYaw = signedAngleOnPlane(forwardAfterUp, placementDirection, floorUp);
+        const deltaYaw = signedAngleOnPlane(axisAfterPlane, desiredAxis, floorUp);
         const qYaw = new THREE.Quaternion().setFromAxisAngle(floorUp, deltaYaw);
-        const rotation = qYaw.multiply(qUp);
+        const rotation = qYaw.multiply(qPlane);
 
         // Interpret configured table height as "meters above floor". We convert
         // it to a headset-relative offset to avoid dependence on absolute
         // scene coordinates (important for ECEF/world-scale scenes).
         const verticalOffsetFromHead = cfg.heightMeters - DEFAULT_XR_EYE_HEIGHT_METERS;
         const desiredCenter = headPose.headPosition.clone()
-            .add(placementDirection.multiplyScalar(cfg.distanceMeters))
+            .add(placementForward.multiplyScalar(cfg.distanceMeters))
             .add(floorUp.multiplyScalar(verticalOffsetFromHead));
 
         const translation = desiredCenter.sub(center);
 
-        return { rotation, translation, pivot: center.clone(), floorUp };
+        return {
+            rotation,
+            translation,
+            pivot: center.clone(),
+            floorUp,
+            placementForward,
+            placementRight,
+            systemPlaneNormal,
+        };
     }
 
     function onXRSessionStart() {
@@ -445,6 +477,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 translation: serializeVector3(computed.translation),
                 pivot: serializeVector3(computed.pivot),
                 floorUp: serializeVector3(computed.floorUp),
+                placementForward: serializeVector3(computed.placementForward),
+                placementRight: serializeVector3(computed.placementRight),
+                systemPlaneNormal: serializeVector3(computed.systemPlaneNormal),
             } : null,
         };
         console.log('[itowns-xr] xr placement debug', snapshot);

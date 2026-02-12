@@ -122,6 +122,12 @@ Last updated: 2026-02-10
     - `renderer.xr.getCamera(...)` world position can be in a different effective space than iTowns ECEF scene objects during immersive rendering.
     - For placement math, use `view.camera3D` pose (scene-space) as the stable reference.
     - Keep XR camera pose only for diagnostics (`__itownsDumpXrPlacementDebug` now reports both `scenePose` and `xrPose`).
+  - XR tabletop orientation correction:
+    - Aligning by a single radial/up axis is insufficient for tabletop layout (can leave the 3-cylinder set tilted).
+    - Correct approach is two-step:
+      - flatten the stencil triangle plane normal to floor up;
+      - then apply yaw in that plane so origin->destination follows `bearingDeg`.
+    - Default bearing semantics now map the O-D axis to viewer-right for `bearingDeg=0` (keeps three cylinders side-by-side in front view).
 
 ## Critical Fixes Applied
 - Camera restore stability:
