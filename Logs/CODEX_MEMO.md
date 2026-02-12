@@ -133,6 +133,10 @@ Last updated: 2026-02-10
       - flatten the stencil triangle plane normal to floor up;
       - then apply yaw in that plane so origin->destination follows `bearingDeg`.
     - Default bearing semantics now map the O-D axis to viewer-right for `bearingDeg=0` (keeps three cylinders side-by-side in front view).
+  - XR bearing semantics (updated):
+    - `xr.immersivePlacement.bearingMode = "device"` (default): `bearingDeg` orbits the whole set around the user/device while preserving configured distance+height.
+    - `xr.immersivePlacement.bearingMode = "center"`: legacy behavior; `bearingDeg` rotates the set around its own center.
+    - `xr.immersivePlacement.spinDeg` adds extra in-plane rotation around set center (works with either mode).
 
 ## Critical Fixes Applied
 - Camera restore stability:

@@ -93,6 +93,11 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         distanceMeters: 0.85,
         heightMeters: 0.82,
         bearingDeg: 0,
+        // 'device': bearing rotates placement around headset/device center.
+        // 'center': bearing rotates the cylinder group around its own center.
+        bearingMode: 'device',
+        // Additional in-plane spin around the cylinder-group center.
+        spinDeg: 0,
     };
     const DEFAULT_XR_EYE_HEIGHT_METERS = 1.6;
     const xrImmersivePlacementState = {
@@ -210,11 +215,16 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function normalizeImmersivePlacementConfig(raw) {
         const cfg = raw && typeof raw === 'object' ? raw : {};
+        const bearingMode = (cfg.bearingMode === 'center' || cfg.bearingMode === 'device')
+            ? cfg.bearingMode
+            : DEFAULT_XR_IMMERSIVE_PLACEMENT.bearingMode;
         return {
             enabled: cfg.enabled !== false,
             distanceMeters: Number.isFinite(cfg.distanceMeters) ? cfg.distanceMeters : DEFAULT_XR_IMMERSIVE_PLACEMENT.distanceMeters,
             heightMeters: Number.isFinite(cfg.heightMeters) ? cfg.heightMeters : DEFAULT_XR_IMMERSIVE_PLACEMENT.heightMeters,
             bearingDeg: Number.isFinite(cfg.bearingDeg) ? cfg.bearingDeg : DEFAULT_XR_IMMERSIVE_PLACEMENT.bearingDeg,
+            bearingMode,
+            spinDeg: Number.isFinite(cfg.spinDeg) ? cfg.spinDeg : DEFAULT_XR_IMMERSIVE_PLACEMENT.spinDeg,
         };
     }
 
@@ -397,7 +407,24 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const placementRight = new THREE.Vector3().crossVectors(placementForward, floorUp).normalize();
         if (placementRight.lengthSq() < 1e-12) return null;
         const bearingRad = THREE.MathUtils.degToRad(cfg.bearingDeg || 0);
-        const desiredAxis = placementRight.clone().applyAxisAngle(floorUp, bearingRad).normalize();
+        const spinRad = THREE.MathUtils.degToRad(cfg.spinDeg || 0);
+
+        let radialDirection = placementForward.clone();
+        let desiredAxis = placementRight.clone();
+        if (cfg.bearingMode === 'center') {
+            // Legacy behavior: keep center in front, rotate group around its center.
+            desiredAxis = placementRight.clone().applyAxisAngle(floorUp, bearingRad).normalize();
+        } else {
+            // Device-orbit behavior: bearing rotates center around user/device.
+            radialDirection = placementForward.clone().applyAxisAngle(floorUp, bearingRad).normalize();
+            desiredAxis = new THREE.Vector3().crossVectors(radialDirection, floorUp).normalize();
+            if (desiredAxis.lengthSq() < 1e-12) {
+                desiredAxis = placementRight.clone().normalize();
+            }
+        }
+        if (Math.abs(spinRad) > 1e-12) {
+            desiredAxis.applyAxisAngle(floorUp, spinRad).normalize();
+        }
 
         // First flatten the full stencil triangle to the floor plane.
         const qPlane = new THREE.Quaternion().setFromUnitVectors(systemPlaneNormal, floorUp);
@@ -414,7 +441,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         // scene coordinates (important for ECEF/world-scale scenes).
         const verticalOffsetFromHead = cfg.heightMeters - DEFAULT_XR_EYE_HEIGHT_METERS;
         const desiredCenter = headPose.headPosition.clone()
-            .add(placementForward.multiplyScalar(cfg.distanceMeters))
+            .add(radialDirection.multiplyScalar(cfg.distanceMeters))
             .add(floorUp.multiplyScalar(verticalOffsetFromHead));
 
         const translation = desiredCenter.sub(center);
@@ -427,6 +454,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             xrReferenceUp: xrRef?.up?.clone?.() || null,
             placementForward,
             placementRight,
+            radialDirection,
             systemPlaneNormal,
         };
     }
@@ -520,6 +548,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 floorUp: serializeVector3(computed.floorUp),
                 placementForward: serializeVector3(computed.placementForward),
                 placementRight: serializeVector3(computed.placementRight),
+                radialDirection: serializeVector3(computed.radialDirection),
                 systemPlaneNormal: serializeVector3(computed.systemPlaneNormal),
             } : null,
         };
