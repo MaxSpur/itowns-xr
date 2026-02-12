@@ -122,6 +122,11 @@ Last updated: 2026-02-10
     - `renderer.xr.getCamera(...)` world position can be in a different effective space than iTowns ECEF scene objects during immersive rendering.
     - For placement math, use `view.camera3D` pose (scene-space) as the stable reference.
     - Keep XR camera pose only for diagnostics (`__itownsDumpXrPlacementDebug` now reports both `scenePose` and `xrPose`).
+  - XR reference-basis timing insight:
+    - `renderer.xr.getFrame()` can be `null` outside the XR render callback window.
+    - Therefore XR-floor basis dependent placement must be attempted during render (`BEFORE_RENDER`) when an XR frame exists, not only at `sessionstart`.
+    - Current flow sets `pendingStart=true` on session start and resolves placement from the per-frame hook.
+    - Guard: while presenting, placement transform must not apply until XR reference basis is available; otherwise fallback to ECEF radial up causes residual tilt.
   - XR tabletop orientation correction:
     - Aligning by a single radial/up axis is insufficient for tabletop layout (can leave the 3-cylinder set tilted).
     - Correct approach is two-step:

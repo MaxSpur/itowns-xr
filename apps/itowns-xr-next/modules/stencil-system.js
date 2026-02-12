@@ -255,6 +255,31 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         return { headPosition, forward, up, floorUp };
     }
 
+    function getXrReferenceUpInScene() {
+        const xr = view?.renderer?.xr;
+        const camera = view?.camera3D;
+        if (!xr?.isPresenting || !camera) return null;
+        const frame = xr.getFrame?.();
+        const refSpace = xr.getReferenceSpace?.();
+        if (!frame || !refSpace) return null;
+        let viewerPose = null;
+        try {
+            viewerPose = frame.getViewerPose(refSpace);
+        } catch (e) {
+            return null;
+        }
+        const ori = viewerPose?.transform?.orientation;
+        if (!ori) return null;
+        if (![ori.x, ori.y, ori.z, ori.w].every(Number.isFinite)) return null;
+
+        // qSceneCamera = qRefToScene * qViewerInRef
+        const qViewerInRef = new THREE.Quaternion(ori.x, ori.y, ori.z, ori.w).normalize();
+        const qRefToScene = camera.quaternion.clone().multiply(qViewerInRef.clone().invert()).normalize();
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(qRefToScene).normalize();
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(qRefToScene).normalize();
+        return { up, forward, qRefToScene, qViewerInRef };
+    }
+
     function getCurrentSystemCenter() {
         const center = stencil3?.uniforms?.uStencilCenter?.value;
         if (center && Number.isFinite(center.x) && Number.isFinite(center.y) && Number.isFinite(center.z)) {
@@ -354,9 +379,14 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const systemUp = getCurrentSystemUp(center);
         const systemForward = getCurrentSystemForward();
         const systemPlaneNormal = getCurrentSystemPlaneNormal(systemUp);
-        const floorUp = (headPose.floorUp && headPose.floorUp.lengthSq() > 1e-12)
-            ? headPose.floorUp.clone().normalize()
-            : upAxis.clone();
+        const xrRef = getXrReferenceUpInScene();
+        const isPresenting = !!view?.renderer?.xr?.isPresenting;
+        if (isPresenting && !xrRef) return null;
+        const floorUp = (xrRef?.up && xrRef.up.lengthSq() > 1e-12)
+            ? xrRef.up.clone()
+            : (headPose.floorUp && headPose.floorUp.lengthSq() > 1e-12)
+                ? headPose.floorUp.clone().normalize()
+                : upAxis.clone();
 
         const placementForward = projectDirectionOnPlane(
             headPose.forward,
@@ -394,6 +424,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             translation,
             pivot: center.clone(),
             floorUp,
+            xrReferenceUp: xrRef?.up?.clone?.() || null,
             placementForward,
             placementRight,
             systemPlaneNormal,
@@ -412,7 +443,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         if (xrImmersivePlacementState.active) return true;
 
         const transform = buildImmersiveTransform();
-        if (!transform) return false;
+        if (!transform) {
+            xrImmersivePlacementState.pendingStart = true;
+            return false;
+        }
 
         applyRigidTransformToSystem(transform.rotation, transform.translation, transform.pivot);
         xrImmersivePlacementState.transform = {
@@ -441,6 +475,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     function dumpXrPlacementDebug() {
         const scenePose = getSceneCameraPose();
         const xrPose = getXrHeadPoseDebug();
+        const xrReference = getXrReferenceUpInScene();
         const center = getCurrentSystemCenter();
         const systemUp = getCurrentSystemUp(center);
         const systemForward = getCurrentSystemForward();
@@ -461,6 +496,12 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 forward: serializeVector3(xrPose.forward),
                 up: serializeVector3(xrPose.up),
                 floorUp: serializeVector3(xrPose.floorUp),
+            } : null,
+            xrReference: xrReference ? {
+                up: serializeVector3(xrReference.up),
+                forward: serializeVector3(xrReference.forward),
+                qRefToScene: serializeQuaternion(xrReference.qRefToScene),
+                qViewerInRef: serializeQuaternion(xrReference.qViewerInRef),
             } : null,
             system: {
                 center: serializeVector3(center),
@@ -487,14 +528,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     }
 
     function scheduleXRSessionStartPlacement({ maxFrames = 60 } = {}) {
-        let framesLeft = Math.max(1, Math.floor(Number(maxFrames) || 1));
-        const tick = () => {
-            if (!view?.renderer?.xr?.isPresenting) return;
-            if (onXRSessionStart()) return;
-            framesLeft -= 1;
-            if (framesLeft > 0) requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
+        void maxFrames;
+        xrImmersivePlacementState.pendingStart = true;
+        onXRSessionStart();
     }
 
     function requestCameraRefresh({ frames = 18 } = {}) {
@@ -1871,6 +1907,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     // Patch before render every frame to avoid flicker and to keep up with new tiles
     view.addFrameRequester(itowns.MAIN_LOOP_EVENTS.BEFORE_RENDER, () => {
+        if (xrImmersivePlacementState.pendingStart && view?.renderer?.xr?.isPresenting && !xrImmersivePlacementState.active) {
+            onXRSessionStart();
+        }
+
         const newly1 = patchMeshesUnderRoot({
             root: stencil1.patchRoot(),
             stencilId: stencil1.id,
