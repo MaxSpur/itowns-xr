@@ -88,6 +88,19 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     let scaleUi = null;
     let savedViewsUi = null;
     const SAVED_TARGET_VIEWS_KEY = 'itowns.xr.savedTargetViews.v1';
+    const DEFAULT_XR_IMMERSIVE_PLACEMENT = {
+        enabled: true,
+        distanceMeters: 0.85,
+        heightMeters: 0.82,
+        bearingDeg: 0,
+    };
+    const DEFAULT_XR_EYE_HEIGHT_METERS = 1.6;
+    const xrImmersivePlacementState = {
+        config: { ...DEFAULT_XR_IMMERSIVE_PLACEMENT },
+        active: false,
+        pendingStart: false,
+        transform: null,
+    };
 
     function isValidGeoPoint(geo) {
         if (!geo) return false;
@@ -172,6 +185,281 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const t = getContextTransformNoScale();
         if (!t || !world) return world?.clone?.() ?? new THREE.Vector3();
         return world.clone().sub(t.pos).applyQuaternion(t.invQuat);
+    }
+
+    function projectDirectionOnPlane(v, normal, fallback = null) {
+        if (!v || !normal) return fallback?.clone?.() || null;
+        const n = normal.clone().normalize();
+        const projected = v.clone().sub(n.multiplyScalar(v.dot(n)));
+        const lenSq = projected.lengthSq();
+        if (lenSq < 1e-12) return fallback?.clone?.() || null;
+        return projected.multiplyScalar(1 / Math.sqrt(lenSq));
+    }
+
+    function signedAngleOnPlane(fromDir, toDir, planeNormal) {
+        if (!fromDir || !toDir || !planeNormal) return 0;
+        const n = planeNormal.clone().normalize();
+        const a = projectDirectionOnPlane(fromDir, n);
+        const b = projectDirectionOnPlane(toDir, n);
+        if (!a || !b) return 0;
+        const cross = new THREE.Vector3().crossVectors(a, b);
+        const sin = n.dot(cross);
+        const cos = THREE.MathUtils.clamp(a.dot(b), -1, 1);
+        return Math.atan2(sin, cos);
+    }
+
+    function normalizeImmersivePlacementConfig(raw) {
+        const cfg = raw && typeof raw === 'object' ? raw : {};
+        return {
+            enabled: cfg.enabled !== false,
+            distanceMeters: Number.isFinite(cfg.distanceMeters) ? cfg.distanceMeters : DEFAULT_XR_IMMERSIVE_PLACEMENT.distanceMeters,
+            heightMeters: Number.isFinite(cfg.heightMeters) ? cfg.heightMeters : DEFAULT_XR_IMMERSIVE_PLACEMENT.heightMeters,
+            bearingDeg: Number.isFinite(cfg.bearingDeg) ? cfg.bearingDeg : DEFAULT_XR_IMMERSIVE_PLACEMENT.bearingDeg,
+        };
+    }
+
+    function setXrImmersivePlacementConfig(config, { applyNow = false } = {}) {
+        xrImmersivePlacementState.config = normalizeImmersivePlacementConfig(config);
+        if (applyNow && xrImmersivePlacementState.active) {
+            // Re-apply from current base space by first undoing active transform.
+            onXRSessionEnd();
+            onXRSessionStart();
+        }
+        return { ...xrImmersivePlacementState.config };
+    }
+
+    function getSceneCameraPose() {
+        const camera = view?.camera3D;
+        if (!camera) return null;
+        camera.updateMatrixWorld(true);
+        const headPosition = camera.position.clone();
+        if (![headPosition.x, headPosition.y, headPosition.z].every(Number.isFinite)) return null;
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+        const floorUp = headPosition.lengthSq() > 1e-12 ? headPosition.clone().normalize() : upAxis.clone();
+        return { headPosition, forward, up, floorUp };
+    }
+
+    function getXrHeadPoseDebug() {
+        const xr = view?.renderer?.xr;
+        if (!xr?.isPresenting) return null;
+        const xrCamera = xr.getCamera?.(view.camera3D);
+        if (!xrCamera) return null;
+        xrCamera.updateMatrixWorld(true);
+        const headPosition = new THREE.Vector3();
+        xrCamera.getWorldPosition(headPosition);
+        if (![headPosition.x, headPosition.y, headPosition.z].every(Number.isFinite)) return null;
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(xrCamera.quaternion).normalize();
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(xrCamera.quaternion).normalize();
+        const floorUp = headPosition.lengthSq() > 1e-12 ? headPosition.clone().normalize() : upAxis.clone();
+        return { headPosition, forward, up, floorUp };
+    }
+
+    function getCurrentSystemCenter() {
+        const center = stencil3?.uniforms?.uStencilCenter?.value;
+        if (center && Number.isFinite(center.x) && Number.isFinite(center.y) && Number.isFinite(center.z)) {
+            return center.clone();
+        }
+        const c1 = stencil1?.uniforms?.uStencilCenter?.value;
+        const c2 = stencil2?.uniforms?.uStencilCenter?.value;
+        if (c1 && c2) return c1.clone().add(c2).multiplyScalar(0.5);
+        return new THREE.Vector3();
+    }
+
+    function getCurrentSystemUp(centerWorld) {
+        const axis = stencil3?.uniforms?.uStencilAxis?.value;
+        if (axis && Number.isFinite(axis.x) && Number.isFinite(axis.y) && Number.isFinite(axis.z) && axis.lengthSq() > 1e-12) {
+            return axis.clone().normalize();
+        }
+        if (centerWorld && centerWorld.lengthSq() > 1e-12) {
+            return centerWorld.clone().normalize();
+        }
+        return upAxis.clone();
+    }
+
+    function getCurrentSystemForward() {
+        const c1 = stencil1?.uniforms?.uStencilCenter?.value;
+        const c2 = stencil2?.uniforms?.uStencilCenter?.value;
+        if (c1 && c2) {
+            const delta = c2.clone().sub(c1);
+            if (delta.lengthSq() > 1e-12) return delta.normalize();
+        }
+        return new THREE.Vector3(1, 0, 0);
+    }
+
+    function applyRigidTransformToObject(object3D, rotation, translation, pivot) {
+        if (!object3D) return;
+        if (pivot) {
+            object3D.position.sub(pivot).applyQuaternion(rotation).add(pivot);
+        } else {
+            object3D.position.applyQuaternion(rotation);
+        }
+        object3D.position.add(translation);
+        object3D.quaternion.premultiply(rotation);
+        object3D.updateMatrixWorld(true);
+    }
+
+    function transformWorldPoint(point, rotation, translation, pivot) {
+        if (!point) return null;
+        const next = point.clone();
+        if (pivot) next.sub(pivot).applyQuaternion(rotation).add(pivot);
+        else next.applyQuaternion(rotation);
+        return next.add(translation);
+    }
+
+    function applyRigidTransformToSystem(rotation, translation, pivot = null) {
+        const prevSuppress = suppressAutoAlignment;
+        suppressAutoAlignment = true;
+        try {
+            applyRigidTransformToObject(contextObject3D, rotation, translation, pivot);
+            applyRigidTransformToObject(originObject3D, rotation, translation, pivot);
+            applyRigidTransformToObject(destinationObject3D, rotation, translation, pivot);
+
+            const c1 = transformWorldPoint(stencil1.uniforms?.uStencilCenter?.value, rotation, translation, pivot);
+            const c2 = transformWorldPoint(stencil2.uniforms?.uStencilCenter?.value, rotation, translation, pivot);
+            const c3 = transformWorldPoint(stencil3.uniforms?.uStencilCenter?.value, rotation, translation, pivot);
+            if (c1) setStencilCenter(stencil1, originObject3D, originLayer, c1);
+            if (c2) setStencilCenter(stencil2, destinationObject3D, destinationLayer, c2);
+            if (c3) setStencilCenter(stencil3, contextObject3D, contextLayer, c3);
+        } finally {
+            suppressAutoAlignment = prevSuppress;
+        }
+
+        if (contextModeState.enabled) {
+            updateContextCylinders();
+        }
+        view.notifyChange(true);
+    }
+
+    function buildImmersiveTransform() {
+        const cfg = xrImmersivePlacementState.config;
+        if (!cfg?.enabled) return null;
+
+        const headPose = getSceneCameraPose();
+        if (!headPose) return null;
+        const center = getCurrentSystemCenter();
+        const systemUp = getCurrentSystemUp(center);
+        const systemForward = getCurrentSystemForward();
+        const floorUp = (headPose.floorUp && headPose.floorUp.lengthSq() > 1e-12) ? headPose.floorUp.clone().normalize() : upAxis.clone();
+
+        const userForward = projectDirectionOnPlane(headPose.forward, floorUp, new THREE.Vector3(0, 0, -1));
+        if (!userForward) return null;
+        const bearingRad = THREE.MathUtils.degToRad(cfg.bearingDeg || 0);
+        const placementDirection = userForward.clone().applyAxisAngle(floorUp, bearingRad).normalize();
+
+        const qUp = new THREE.Quaternion().setFromUnitVectors(systemUp, floorUp);
+        const forwardAfterUp = projectDirectionOnPlane(systemForward.clone().applyQuaternion(qUp), floorUp, new THREE.Vector3(1, 0, 0));
+        if (!forwardAfterUp) return null;
+
+        const deltaYaw = signedAngleOnPlane(forwardAfterUp, placementDirection, floorUp);
+        const qYaw = new THREE.Quaternion().setFromAxisAngle(floorUp, deltaYaw);
+        const rotation = qYaw.multiply(qUp);
+
+        // Interpret configured table height as "meters above floor". We convert
+        // it to a headset-relative offset to avoid dependence on absolute
+        // scene coordinates (important for ECEF/world-scale scenes).
+        const verticalOffsetFromHead = cfg.heightMeters - DEFAULT_XR_EYE_HEIGHT_METERS;
+        const desiredCenter = headPose.headPosition.clone()
+            .add(placementDirection.multiplyScalar(cfg.distanceMeters))
+            .add(floorUp.multiplyScalar(verticalOffsetFromHead));
+
+        const translation = desiredCenter.sub(center);
+
+        return { rotation, translation, pivot: center.clone(), floorUp };
+    }
+
+    function onXRSessionStart() {
+        if (!isGlobeInitialized) {
+            xrImmersivePlacementState.pendingStart = true;
+            return false;
+        }
+        if (xrImmersivePlacementState.config?.enabled === false) {
+            xrImmersivePlacementState.pendingStart = false;
+            return true;
+        }
+        if (xrImmersivePlacementState.active) return true;
+
+        const transform = buildImmersiveTransform();
+        if (!transform) return false;
+
+        applyRigidTransformToSystem(transform.rotation, transform.translation, transform.pivot);
+        xrImmersivePlacementState.transform = {
+            rotation: transform.rotation.clone(),
+            translation: transform.translation.clone(),
+            pivot: transform.pivot?.clone?.() || null,
+        };
+        xrImmersivePlacementState.active = true;
+        xrImmersivePlacementState.pendingStart = false;
+        requestCameraRefresh({ frames: 24 });
+        return true;
+    }
+
+    function onXRSessionEnd() {
+        if (!xrImmersivePlacementState.active || !xrImmersivePlacementState.transform) return false;
+        const qInv = xrImmersivePlacementState.transform.rotation.clone().invert();
+        const tInv = xrImmersivePlacementState.transform.translation.clone().applyQuaternion(qInv).multiplyScalar(-1);
+        applyRigidTransformToSystem(qInv, tInv, xrImmersivePlacementState.transform.pivot || null);
+        xrImmersivePlacementState.transform = null;
+        xrImmersivePlacementState.active = false;
+        xrImmersivePlacementState.pendingStart = false;
+        requestCameraRefresh({ frames: 12 });
+        return true;
+    }
+
+    function dumpXrPlacementDebug() {
+        const scenePose = getSceneCameraPose();
+        const xrPose = getXrHeadPoseDebug();
+        const center = getCurrentSystemCenter();
+        const systemUp = getCurrentSystemUp(center);
+        const systemForward = getCurrentSystemForward();
+        const computed = buildImmersiveTransform();
+        const snapshot = {
+            presenting: !!view?.renderer?.xr?.isPresenting,
+            config: { ...xrImmersivePlacementState.config },
+            active: xrImmersivePlacementState.active,
+            pendingStart: xrImmersivePlacementState.pendingStart,
+            scenePose: scenePose ? {
+                headPosition: serializeVector3(scenePose.headPosition),
+                forward: serializeVector3(scenePose.forward),
+                up: serializeVector3(scenePose.up),
+                floorUp: serializeVector3(scenePose.floorUp),
+            } : null,
+            xrPose: xrPose ? {
+                headPosition: serializeVector3(xrPose.headPosition),
+                forward: serializeVector3(xrPose.forward),
+                up: serializeVector3(xrPose.up),
+                floorUp: serializeVector3(xrPose.floorUp),
+            } : null,
+            system: {
+                center: serializeVector3(center),
+                up: serializeVector3(systemUp),
+                forward: serializeVector3(systemForward),
+            },
+            activeTransform: xrImmersivePlacementState.transform ? {
+                rotation: serializeQuaternion(xrImmersivePlacementState.transform.rotation),
+                translation: serializeVector3(xrImmersivePlacementState.transform.translation),
+                pivot: serializeVector3(xrImmersivePlacementState.transform.pivot),
+            } : null,
+            computedTransform: computed ? {
+                rotation: serializeQuaternion(computed.rotation),
+                translation: serializeVector3(computed.translation),
+                pivot: serializeVector3(computed.pivot),
+                floorUp: serializeVector3(computed.floorUp),
+            } : null,
+        };
+        console.log('[itowns-xr] xr placement debug', snapshot);
+        return snapshot;
+    }
+
+    function scheduleXRSessionStartPlacement({ maxFrames = 60 } = {}) {
+        let framesLeft = Math.max(1, Math.floor(Number(maxFrames) || 1));
+        const tick = () => {
+            if (!view?.renderer?.xr?.isPresenting) return;
+            if (onXRSessionStart()) return;
+            framesLeft -= 1;
+            if (framesLeft > 0) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
     }
 
     function requestCameraRefresh({ frames = 18 } = {}) {
@@ -1012,6 +1300,9 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                     cylinderVisible: stencil3.cylinder?.mesh?.visible ?? null,
                 },
             },
+            xr: {
+                immersivePlacement: { ...xrImmersivePlacementState.config },
+            },
         };
     }
 
@@ -1363,6 +1654,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
 
     function applyConfigInternal(config) {
         if (!config) return;
+        setXrImmersivePlacementConfig(config?.xr?.immersivePlacement, { applyNow: false });
         const stencilsCfg = config.stencils || {};
         const transformsAreRuntimeSnapshot = config?.globes?.runtimeSnapshot === true;
         const transformsCfg = config?.globes?.transforms;
@@ -1468,6 +1760,10 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
     window.__itownsSavedViewsSave = (name = '') => saveCurrentTargetView(name);
     window.__itownsSavedViewsApply = (id) => applySavedTargetView(id);
     window.__itownsSavedViewsDelete = (id) => deleteSavedTargetView(id);
+    window.__itownsSetXrPlacement = (cfg = {}, applyNow = false) =>
+        setXrImmersivePlacementConfig(cfg, { applyNow: !!applyNow });
+    window.__itownsGetXrPlacement = () => ({ ...xrImmersivePlacementState.config });
+    window.__itownsDumpXrPlacementDebug = dumpXrPlacementDebug;
     attachDumpControls({
         panel: stencil3.ui.panel,
         onDump: dumpConfigSnapshot,
@@ -1590,8 +1886,23 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             applyConfigInternal(cfg);
         }
 
+        if (xrImmersivePlacementState.pendingStart && view?.renderer?.xr?.isPresenting) {
+            scheduleXRSessionStartPlacement();
+        }
+
         view.notifyChange(true);
     });
 
-    return { stencil1, stencil2, stencil3, contextModeState, applyConfig };
+    return {
+        stencil1,
+        stencil2,
+        stencil3,
+        contextModeState,
+        applyConfig,
+        onXRSessionStart: scheduleXRSessionStartPlacement,
+        onXRSessionEnd,
+        setXrImmersivePlacementConfig,
+        getXrImmersivePlacementConfig: () => ({ ...xrImmersivePlacementState.config }),
+        dumpXrPlacementDebug,
+    };
 }

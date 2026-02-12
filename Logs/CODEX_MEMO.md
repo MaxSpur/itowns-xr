@@ -101,6 +101,27 @@ Last updated: 2026-02-10
     - prefers `immersive-ar` when available, otherwise falls back to `immersive-vr`.
     - explicit `renderer.xr.setReferenceSpaceType('local-floor')` unless overridden in `attachXRButton(..., { referenceSpaceType })`.
     - `configureTransparentXR()` is no-op by default (no manual baseLayer replacement).
+  - XR tabletop placement now has a dedicated immersive-only rigid transform (session start/end):
+    - Activated on `renderer.xr` `sessionstart`, reverted on `sessionend`.
+    - Transform parameters are user-facing config:
+      - `xr.immersivePlacement.distanceMeters`
+      - `xr.immersivePlacement.heightMeters`
+      - `xr.immersivePlacement.bearingDeg`
+      - `xr.immersivePlacement.enabled`
+    - It rotates the current globe/cylinder system to horizontal (`+Y` up), applies yaw from headset forward+bearing, then translates to desired table distance/height.
+    - Applied and reverted as a single rigid transform over all globe roots + stencil centers, preserving relative target/mask layout.
+  - Important correction:
+    - In ECEF/world-scale scenes, using absolute `desiredCenter.y = tableHeight` is invalid and can throw the whole scene far away.
+    - Placement height is now converted to a headset-relative vertical offset (`tableHeight - assumedEyeHeight`) using XR camera `up`, so it remains stable even when world coordinates are large.
+    - Added runtime diagnostics hook: `window.__itownsDumpXrPlacementDebug()`.
+  - Additional correction:
+    - XR rigid transform rotation must be applied around the current system center (pivot), not around world origin.
+    - Rotating around origin in ECEF coordinates produced million-meter translations and made cylinders disappear in XR.
+    - Current transform stores `{ rotation, translation, pivot }` and applies both forward/reverse transforms around the same pivot.
+  - XR placement pose source insight:
+    - `renderer.xr.getCamera(...)` world position can be in a different effective space than iTowns ECEF scene objects during immersive rendering.
+    - For placement math, use `view.camera3D` pose (scene-space) as the stable reference.
+    - Keep XR camera pose only for diagnostics (`__itownsDumpXrPlacementDebug` now reports both `scenePose` and `xrPose`).
 
 ## Critical Fixes Applied
 - Camera restore stability:

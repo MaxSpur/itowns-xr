@@ -254,6 +254,18 @@ function createStartupWarmup(view, {
     return { start, stop };
 }
 
+function attachXrSessionPlacementHooks(view, stencilSystem) {
+    const xr = view?.renderer?.xr;
+    if (!xr || !stencilSystem) return;
+
+    xr.addEventListener?.('sessionstart', () => {
+        stencilSystem.onXRSessionStart?.();
+    });
+    xr.addEventListener?.('sessionend', () => {
+        stencilSystem.onXRSessionEnd?.();
+    });
+}
+
 async function bootstrap() {
     const configUrl = resolveConfigUrl();
     const config = await loadAppConfig({ url: configUrl, silent: true });
@@ -288,6 +300,7 @@ async function bootstrap() {
     view.userData.globeTransforms = globeTransforms;
 
     const stencilSystem = setupStencilSystem({ view, viewerDiv, contextRoot, originObject3D, destinationObject3D });
+    attachXrSessionPlacementHooks(view, stencilSystem);
     const startupWarmup = createStartupWarmup(view);
     if (config) {
         let userInteractedSinceLoad = false;
