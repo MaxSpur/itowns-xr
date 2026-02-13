@@ -105,6 +105,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         active: false,
         pendingStart: false,
         transform: null,
+        lastXrReference: null,
     };
 
     function isValidGeoPoint(geo) {
@@ -269,25 +270,41 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const xr = view?.renderer?.xr;
         const camera = view?.camera3D;
         if (!xr?.isPresenting || !camera) return null;
+
+        const cloneRef = (ref) => (ref ? {
+            up: ref.up?.clone?.() || null,
+            forward: ref.forward?.clone?.() || null,
+            qRefToScene: ref.qRefToScene?.clone?.() || null,
+            qViewerInRef: ref.qViewerInRef?.clone?.() || null,
+            viewerPosInRef: ref.viewerPosInRef?.clone?.() || null,
+            floorOrigin: ref.floorOrigin?.clone?.() || null,
+        } : null);
+
         const frame = xr.getFrame?.();
         const refSpace = xr.getReferenceSpace?.();
-        if (!frame || !refSpace) return null;
+        if (!frame || !refSpace) return cloneRef(xrImmersivePlacementState.lastXrReference);
         let viewerPose = null;
         try {
             viewerPose = frame.getViewerPose(refSpace);
         } catch (e) {
-            return null;
+            return cloneRef(xrImmersivePlacementState.lastXrReference);
         }
         const ori = viewerPose?.transform?.orientation;
-        if (!ori) return null;
-        if (![ori.x, ori.y, ori.z, ori.w].every(Number.isFinite)) return null;
+        const pos = viewerPose?.transform?.position;
+        if (!ori) return cloneRef(xrImmersivePlacementState.lastXrReference);
+        if (![ori.x, ori.y, ori.z, ori.w].every(Number.isFinite)) return cloneRef(xrImmersivePlacementState.lastXrReference);
+        if (!pos || ![pos.x, pos.y, pos.z].every(Number.isFinite)) return cloneRef(xrImmersivePlacementState.lastXrReference);
 
         // qSceneCamera = qRefToScene * qViewerInRef
         const qViewerInRef = new THREE.Quaternion(ori.x, ori.y, ori.z, ori.w).normalize();
         const qRefToScene = camera.quaternion.clone().multiply(qViewerInRef.clone().invert()).normalize();
+        const viewerPosInRef = new THREE.Vector3(pos.x, pos.y, pos.z);
+        const floorOrigin = camera.position.clone().sub(viewerPosInRef.clone().applyQuaternion(qRefToScene));
         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(qRefToScene).normalize();
         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(qRefToScene).normalize();
-        return { up, forward, qRefToScene, qViewerInRef };
+        const current = { up, forward, qRefToScene, qViewerInRef, viewerPosInRef, floorOrigin };
+        xrImmersivePlacementState.lastXrReference = cloneRef(current);
+        return current;
     }
 
     function getCurrentSystemCenter() {
@@ -397,6 +414,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             : (headPose.floorUp && headPose.floorUp.lengthSq() > 1e-12)
                 ? headPose.floorUp.clone().normalize()
                 : upAxis.clone();
+        const floorOrigin = xrRef?.floorOrigin || null;
 
         const placementForward = projectDirectionOnPlane(
             headPose.forward,
@@ -436,10 +454,12 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         const qYaw = new THREE.Quaternion().setFromAxisAngle(floorUp, deltaYaw);
         const rotation = qYaw.multiply(qPlane);
 
-        // Interpret configured table height as "meters above floor". We convert
-        // it to a headset-relative offset to avoid dependence on absolute
-        // scene coordinates (important for ECEF/world-scale scenes).
-        const verticalOffsetFromHead = cfg.heightMeters - DEFAULT_XR_EYE_HEIGHT_METERS;
+        // Height is absolute relative to the XR floor reference.
+        // If floor origin is unavailable, fallback to legacy headset-relative interpretation.
+        const headHeightAboveFloor = floorOrigin
+            ? headPose.headPosition.clone().sub(floorOrigin).dot(floorUp)
+            : DEFAULT_XR_EYE_HEIGHT_METERS;
+        const verticalOffsetFromHead = cfg.heightMeters - headHeightAboveFloor;
         const desiredCenter = headPose.headPosition.clone()
             .add(radialDirection.multiplyScalar(cfg.distanceMeters))
             .add(floorUp.multiplyScalar(verticalOffsetFromHead));
@@ -451,6 +471,8 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
             translation,
             pivot: center.clone(),
             floorUp,
+            floorOrigin: floorOrigin?.clone?.() || null,
+            headHeightAboveFloor,
             xrReferenceUp: xrRef?.up?.clone?.() || null,
             placementForward,
             placementRight,
@@ -496,6 +518,7 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
         xrImmersivePlacementState.transform = null;
         xrImmersivePlacementState.active = false;
         xrImmersivePlacementState.pendingStart = false;
+        xrImmersivePlacementState.lastXrReference = null;
         requestCameraRefresh({ frames: 12 });
         return true;
     }
@@ -530,6 +553,8 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 forward: serializeVector3(xrReference.forward),
                 qRefToScene: serializeQuaternion(xrReference.qRefToScene),
                 qViewerInRef: serializeQuaternion(xrReference.qViewerInRef),
+                floorOrigin: serializeVector3(xrReference.floorOrigin),
+                viewerPosInRef: serializeVector3(xrReference.viewerPosInRef),
             } : null,
             system: {
                 center: serializeVector3(center),
@@ -546,6 +571,8 @@ export function setupStencilSystem({ view, viewerDiv, contextRoot, originObject3
                 translation: serializeVector3(computed.translation),
                 pivot: serializeVector3(computed.pivot),
                 floorUp: serializeVector3(computed.floorUp),
+                floorOrigin: serializeVector3(computed.floorOrigin),
+                headHeightAboveFloor: computed.headHeightAboveFloor,
                 placementForward: serializeVector3(computed.placementForward),
                 placementRight: serializeVector3(computed.placementRight),
                 radialDirection: serializeVector3(computed.radialDirection),

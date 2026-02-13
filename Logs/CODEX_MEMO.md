@@ -127,6 +127,7 @@ Last updated: 2026-02-10
     - Therefore XR-floor basis dependent placement must be attempted during render (`BEFORE_RENDER`) when an XR frame exists, not only at `sessionstart`.
     - Current flow sets `pendingStart=true` on session start and resolves placement from the per-frame hook.
     - Guard: while presenting, placement transform must not apply until XR reference basis is available; otherwise fallback to ECEF radial up causes residual tilt.
+    - Keep last valid XR reference basis cached so debug/command-triggered placement can still use floor data even when `xr.getFrame()` is null outside immediate frame callbacks.
   - XR tabletop orientation correction:
     - Aligning by a single radial/up axis is insufficient for tabletop layout (can leave the 3-cylinder set tilted).
     - Correct approach is two-step:
@@ -137,6 +138,12 @@ Last updated: 2026-02-10
     - `xr.immersivePlacement.bearingMode = "device"` (default): `bearingDeg` orbits the whole set around the user/device while preserving configured distance+height.
     - `xr.immersivePlacement.bearingMode = "center"`: legacy behavior; `bearingDeg` rotates the set around its own center.
     - `xr.immersivePlacement.spinDeg` adds extra in-plane rotation around set center (works with either mode).
+  - XR height semantics correction:
+    - `heightMeters` should be absolute above XR floor, not relative to current headset height.
+    - Compute floor origin in scene space from XR viewer pose:
+      - `qRefToScene = qSceneCamera * inverse(qViewerInRef)`
+      - `floorOrigin = sceneHeadPosition - qRefToScene * viewerPositionInRef`
+    - Then use `headHeightAboveFloor = dot(head - floorOrigin, floorUp)` and offset by `heightMeters - headHeightAboveFloor`.
 
 ## Critical Fixes Applied
 - Camera restore stability:
